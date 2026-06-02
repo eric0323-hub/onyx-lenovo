@@ -9,50 +9,75 @@ This is the low-risk local workflow for reviewing the Onyx admin UI integration 
 
 ## Start Langfuse Locally
 
-Keep the first local validation run independent from the Onyx Docker Compose
-stack. This makes the integration easy to turn off and avoids coupling Onyx
-stability to Langfuse while you review the UI.
+The default Docker Compose file includes an optional `langfuse` profile. It
+starts Langfuse web, Langfuse worker, Postgres, ClickHouse, Redis, and a
+Langfuse-specific MinIO instance with service names prefixed by `langfuse-`.
+This keeps Langfuse infrastructure separate from Onyx's own database/cache/file
+store while still sharing the same Docker network.
 
-Recommended local flow:
-
-1. Start Langfuse from the official Docker Compose example in a separate
-   directory.
-2. Publish the Langfuse web service on host port `3001`.
-3. Open `http://localhost:3001`, create the first admin account, create a
-   project, and copy that project's public and secret API keys.
-
-Use the official Langfuse self-hosting Docker Compose documentation for the
-exact compose file and required Langfuse infrastructure variables. The Onyx
-integration only needs the final Langfuse UI URL and project keys.
-
-If Onyx runs in Docker and Langfuse runs on the host, configure Onyx with:
+Enable the local stack in `deployment/docker_compose/.env`:
 
 ```env
-LANGFUSE_HOST=http://host.docker.internal:3001
+COMPOSE_PROFILES=s3-filestore,langfuse
+LANGFUSE_HOST=http://langfuse-web:3000
 LANGFUSE_UI_HOST=http://localhost:3001
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_PUBLIC_KEY=pk-lf-local-onyx
+LANGFUSE_SECRET_KEY=sk-lf-local-onyx
+LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-local-onyx
+LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-local-onyx
+LANGFUSE_INIT_USER_EMAIL=admin@example.com
+LANGFUSE_INIT_USER_PASSWORD=LangfuseLocal123!
 ```
 
-If Onyx backend runs directly on the host, `LANGFUSE_HOST=http://localhost:3001` is fine.
+Then start or recreate the services:
+
+```bash
+cd deployment/docker_compose
+docker compose up -d langfuse-web langfuse-worker
+docker compose up -d --force-recreate api_server background web_server nginx
+```
+
+If you use the dev override:
+
+```bash
+cd deployment/docker_compose
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d langfuse-web langfuse-worker
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate api_server background web_server nginx
+```
+
+The bundled profile initializes a local Langfuse organization/project and the
+project API keys listed above. For production, replace every `LANGFUSE_*`
+secret and prefer a separately managed Langfuse deployment.
+
+Check local startup:
+
+```bash
+docker compose ps langfuse-web langfuse-worker
+curl http://localhost:3001
+```
 
 `LANGFUSE_HOST` is the URL used by the API server and workers to send traces.
 `LANGFUSE_UI_HOST` is only the browser link shown in the Onyx admin page. Do
-not put the Langfuse secret key in any frontend or `NEXT_PUBLIC_*` variable.
+not put `LANGFUSE_SECRET_KEY` in any frontend or `NEXT_PUBLIC_*` variable.
 
-After changing these values, restart the API server and any workers you want to
-trace. In local Docker, restarting only the web server is not enough because
-the tracing processor is initialized in the Python services.
+After changing these values, restart the API server and workers. Restarting
+only the web server is not enough because the tracing processor is initialized
+in the Python services.
 
 ## UI Review Flow
 
-1. Start Langfuse locally and create a project.
-2. Copy the project public and secret keys into the Onyx API server and worker environment.
-3. Restart the API server and workers so `setup_tracing()` runs with the new keys.
+1. Start the `langfuse` compose profile.
+2. Restart the Onyx API server and workers so `setup_tracing()` runs with the new keys.
+3. Open `http://localhost:3001` and log in with the local Langfuse admin account if needed.
 4. Open `http://localhost:3000/admin/performance/observability`.
 5. Confirm the page shows public key, secret key, processor, and console URL as configured.
 6. Click `Send Samples`.
 7. Open Langfuse and check the Traces view.
+
+Local Langfuse login:
+
+- Email: `admin@example.com`
+- Password: `LangfuseLocal123!`
 
 If the `Send Samples` button is disabled, the status card should tell you which
 part is missing. Common causes are missing keys, `LANGFUSE_UI_HOST` not set, or
@@ -110,10 +135,10 @@ After keys are configured and the API server has restarted successfully:
 - Console URL available: on
 - `Send Samples`: enabled
 
-When Onyx runs in Docker and Langfuse runs on the host, the page should show a
+When Onyx and Langfuse both run in Docker, the page should show a
 separate-ingestion-url notice:
 
-- Ingestion host: `http://host.docker.internal:3001`
+- Ingestion host: `http://langfuse-web:3000`
 - Console URL: `http://localhost:3001`
 
 ## Minimal Rollback

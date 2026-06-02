@@ -143,6 +143,8 @@ export const SWR_KEYS = {
 
   // ── Usage Reports ─────────────────────────────────────────────────────────
   usageReport: "/api/admin/usage-report",
+  langfuseStatus: "/api/admin/observability/langfuse/status",
+  langfuseSampleTraces: "/api/admin/observability/langfuse/sample-traces",
 
   // ── Web Search ────────────────────────────────────────────────────────────
   webSearchContentProviders: "/api/admin/web-search/content-providers",

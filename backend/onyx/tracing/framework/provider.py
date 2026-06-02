@@ -179,6 +179,10 @@ class TraceProvider(ABC):
     def shutdown(self) -> None:
         """Clean up any resources used by the provider."""
 
+    @abstractmethod
+    def force_flush(self) -> None:
+        """Force all processors to flush any buffered trace data."""
+
 
 class DefaultTraceProvider(TraceProvider):
     def __init__(self) -> None:
@@ -321,3 +325,9 @@ class DefaultTraceProvider(TraceProvider):
             self._multi_processor.shutdown()
         except Exception as e:
             logger.error("Error shutting down trace provider: %s", e)
+
+    def force_flush(self) -> None:
+        try:
+            self._multi_processor.force_flush()
+        except Exception as e:
+            logger.error("Error flushing trace provider: %s", e)

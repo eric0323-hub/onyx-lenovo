@@ -10,6 +10,7 @@ from onyx.utils.logger import setup_logger
 logger = setup_logger()
 
 _initialized = False
+_initialized_provider_names: list[str] = []
 
 
 def setup_tracing() -> list[str]:
@@ -50,6 +51,8 @@ def setup_tracing() -> list[str]:
         logger.info("Langfuse credentials not provided, skipping Langfuse setup")
 
     _initialized = True
+    _initialized_provider_names.clear()
+    _initialized_provider_names.extend(initialized_providers)
 
     if initialized_providers:
         logger.notice(
@@ -59,6 +62,10 @@ def setup_tracing() -> list[str]:
         logger.info("No tracing providers configured")
 
     return initialized_providers
+
+
+def get_initialized_tracing_providers() -> list[str]:
+    return list(_initialized_provider_names)
 
 
 def _setup_braintrust() -> None:

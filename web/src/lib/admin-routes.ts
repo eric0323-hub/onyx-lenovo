@@ -16,6 +16,7 @@ import {
   SvgFiles,
   SvgGlobe,
   SvgHistory,
+  SvgEye,
   SvgImage,
   SvgMcp,
   SvgOnyxOctagon,
@@ -203,6 +204,12 @@ export const ADMIN_ROUTES = {
     icon: SvgHistory,
     title: "Query History",
     sidebarLabel: "Query History",
+  },
+  OBSERVABILITY: {
+    path: "/admin/performance/observability",
+    icon: SvgEye,
+    title: "Observability",
+    sidebarLabel: "Observability",
   },
   CUSTOM_ANALYTICS: {
     path: "/admin/performance/custom-analytics",

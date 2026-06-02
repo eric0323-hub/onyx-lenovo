@@ -165,6 +165,11 @@ function buildItems(
     });
   }
 
+  // 7. Usage and observability (admin only)
+  if (!isCurator) {
+    add(SECTIONS.USAGE, ADMIN_ROUTES.OBSERVABILITY);
+  }
+
   return items;
 }
 

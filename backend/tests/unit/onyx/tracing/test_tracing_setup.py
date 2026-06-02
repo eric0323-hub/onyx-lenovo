@@ -21,10 +21,12 @@ def test_setup_tracing_with_no_creds() -> None:
 
     # Reset the initialized flag
     tracing_setup._initialized = False
+    tracing_setup._initialized_provider_names = []
 
     # Call the function - should return empty list
     result = tracing_setup.setup_tracing()
     assert result == []
+    assert tracing_setup.get_initialized_tracing_providers() == []
 
 
 def test_setup_tracing_is_idempotent() -> None:
@@ -40,6 +42,7 @@ def test_setup_tracing_is_idempotent() -> None:
 
     # Reset the initialized flag
     tracing_setup._initialized = False
+    tracing_setup._initialized_provider_names = []
 
     # First call
     tracing_setup.setup_tracing()
@@ -50,6 +53,7 @@ def test_setup_tracing_is_idempotent() -> None:
 
     # Clean up
     tracing_setup._initialized = False
+    tracing_setup._initialized_provider_names = []
 
 
 def test_setup_tracing_with_braintrust_creds() -> None:
@@ -66,17 +70,20 @@ def test_setup_tracing_with_braintrust_creds() -> None:
 
     # Reset the initialized flag
     tracing_setup._initialized = False
+    tracing_setup._initialized_provider_names = []
 
     # Mock the _setup_braintrust function to avoid actual initialization
     with patch.object(tracing_setup, "_setup_braintrust") as mock_setup:
         result = tracing_setup.setup_tracing()
         mock_setup.assert_called_once()
         assert "braintrust" in result
+        assert tracing_setup.get_initialized_tracing_providers() == ["braintrust"]
 
     # Clean up
     os.environ.pop("BRAINTRUST_API_KEY", None)
     os.environ.pop("BRAINTRUST_PROJECT", None)
     tracing_setup._initialized = False
+    tracing_setup._initialized_provider_names = []
     importlib.reload(app_configs)
 
 
@@ -93,17 +100,20 @@ def test_setup_tracing_with_langfuse_creds() -> None:
 
     # Reset the initialized flag
     tracing_setup._initialized = False
+    tracing_setup._initialized_provider_names = []
 
     # Mock the _setup_langfuse function to avoid actual initialization
     with patch.object(tracing_setup, "_setup_langfuse") as mock_setup:
         result = tracing_setup.setup_tracing()
         mock_setup.assert_called_once()
         assert "langfuse" in result
+        assert tracing_setup.get_initialized_tracing_providers() == ["langfuse"]
 
     # Clean up
     os.environ.pop("LANGFUSE_SECRET_KEY", None)
     os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
     tracing_setup._initialized = False
+    tracing_setup._initialized_provider_names = []
     importlib.reload(app_configs)
 
 
@@ -121,6 +131,7 @@ def test_setup_tracing_with_both_providers() -> None:
 
     # Reset the initialized flag
     tracing_setup._initialized = False
+    tracing_setup._initialized_provider_names = []
 
     # Mock both setup functions to avoid actual initialization
     with (
@@ -132,6 +143,10 @@ def test_setup_tracing_with_both_providers() -> None:
         mock_lf.assert_called_once()
         assert "braintrust" in result
         assert "langfuse" in result
+        assert tracing_setup.get_initialized_tracing_providers() == [
+            "braintrust",
+            "langfuse",
+        ]
 
     # Clean up
     os.environ.pop("BRAINTRUST_API_KEY", None)
@@ -139,4 +154,5 @@ def test_setup_tracing_with_both_providers() -> None:
     os.environ.pop("LANGFUSE_SECRET_KEY", None)
     os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
     tracing_setup._initialized = False
+    tracing_setup._initialized_provider_names = []
     importlib.reload(app_configs)

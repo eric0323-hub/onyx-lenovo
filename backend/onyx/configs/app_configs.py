@@ -1083,6 +1083,7 @@ SCHEDULED_EVAL_PROJECT = os.environ.get("SCHEDULED_EVAL_PROJECT", "st-dev")
 LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY") or ""
 LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY") or ""
 LANGFUSE_HOST = os.environ.get("LANGFUSE_HOST") or ""  # For self-hosted Langfuse
+LANGFUSE_UI_HOST = os.environ.get("LANGFUSE_UI_HOST") or ""
 
 # Defined custom query/answer conditions to validate the query and the LLM answer.
 # Format: list of strings

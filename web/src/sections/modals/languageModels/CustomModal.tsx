@@ -28,6 +28,7 @@ import InputComboBox from "@/refresh-components/inputs/InputComboBox";
 import InputTypeIn from "@/refresh-components/inputs/InputTypeIn";
 import InputSelect from "@/refresh-components/inputs/InputSelect";
 import Text from "@/refresh-components/texts/Text";
+import { DOCS_ADMINS_PATH } from "@/lib/constants";
 import { Button, Card, EmptyMessageCard } from "@opal/components";
 import { SvgMinusCircle, SvgPlusCircle } from "@opal/icons";
 import { markdown } from "@opal/utils";
@@ -407,7 +408,7 @@ export default function CustomModal({
           <Content
             title="Environment Variables"
             description={markdown(
-              "Add extra properties as needed by the model provider. These are passed to LiteLLM's `completion()` call as [environment variables](https://docs.litellm.ai/docs/set_keys#environment-variables). See [documentation](https://docs.onyx.app/admins/ai_models/custom_inference_provider) for more instructions."
+              `Add extra properties as needed by the model provider. These are passed to LiteLLM's \`completion()\` call as [environment variables](https://docs.litellm.ai/docs/set_keys#environment-variables). See [documentation](${DOCS_ADMINS_PATH}/ai_models/custom_inference_provider) for more instructions.`
             )}
             width="full"
             variant="section"

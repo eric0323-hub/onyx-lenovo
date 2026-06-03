@@ -91,7 +91,7 @@ export default function SkillsPage() {
       <SettingsLayouts.Header
         icon={SvgBlocks}
         title="Skills"
-        description="Capability bundles the Craft agent can reach for. Built-in skills ship with Onyx; custom skills are uploaded zip bundles, gated by group grants."
+        description="Capability bundles the Craft agent can reach for. Built-in skills ship with LKnow; custom skills are uploaded zip bundles, gated by group grants."
         rightChildren={
           <Button icon={SvgPlus} onClick={() => setUploadOpen(true)}>
             Upload skill

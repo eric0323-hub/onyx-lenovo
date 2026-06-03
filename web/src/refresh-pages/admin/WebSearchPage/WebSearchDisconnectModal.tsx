@@ -105,7 +105,7 @@ export function WebSearchDisconnectModal({
             </Text>
             {!hasAnotherProvider && (
               <Text color="text-03">
-                Onyx will fall back to the built-in web crawler.
+                LKnow will fall back to the built-in web crawler.
               </Text>
             )}
           </>

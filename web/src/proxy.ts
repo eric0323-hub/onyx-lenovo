@@ -5,6 +5,10 @@ import {
   SERVER_SIDE_ONLY__PAID_ENTERPRISE_FEATURES_ENABLED,
   SERVER_SIDE_ONLY__AUTH_TYPE,
 } from "./lib/constants";
+import {
+  featureVisibilityConfig,
+  getHiddenFeatureForUrl,
+} from "./lib/featureVisibility";
 
 // Authentication cookie names (matches backend constants)
 const FASTAPI_USERS_AUTH_COOKIE_NAME = "fastapiusersauth";
@@ -23,6 +27,14 @@ export const config = {
     // Auth-protected routes (for middleware auth check)
     "/app/:path*",
     "/admin/:path*",
+    "/ee/:path*",
+    "/anonymous/:path*",
+    "/auth/:path*",
+    "/craft/:path*",
+    "/nrf/:path*",
+    "/federated/oauth/callback",
+    "/mcp/oauth/callback",
+    "/oauth-config/callback",
     "/agents/:path*",
     "/connector/:path*",
 
@@ -52,6 +64,23 @@ const EE_ROUTES = [
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  const hiddenFeature = getHiddenFeatureForUrl(
+    pathname,
+    request.nextUrl.searchParams
+  );
+  if (hiddenFeature) {
+    if (featureVisibilityConfig.hiddenFeatureFallback === "404") {
+      return new NextResponse("Not Found", { status: 404 });
+    }
+
+    if (pathname === "/app") {
+      return new NextResponse("Not Found", { status: 404 });
+    }
+
+    const appUrl = new URL("/app", request.url);
+    return NextResponse.redirect(appUrl);
+  }
 
   // Auth Check: Fast-fail at edge if no cookie (defense in depth)
   // Note: Layouts still do full verification (token validity, roles, etc.)

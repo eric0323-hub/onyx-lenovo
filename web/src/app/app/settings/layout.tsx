@@ -8,6 +8,7 @@ import { SvgSliders } from "@opal/icons";
 import { useUser } from "@/providers/UserProvider";
 import { useAuthType } from "@/lib/hooks";
 import { Section } from "@/layouts/general-layouts";
+import { isFeatureVisible } from "@/lib/featureVisibility";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -20,7 +21,14 @@ export default function Layout({ children }: LayoutProps) {
 
   const showPasswordSection = Boolean(user?.password_configured);
   const showTokensSection = authType !== null;
-  const showAccountsAccessTab = showPasswordSection || showTokensSection;
+  const showAccountsAccessTab =
+    isFeatureVisible("userSettingsAccountsAccess") &&
+    (showPasswordSection || showTokensSection);
+  const showGeneralTab = isFeatureVisible("userSettingsGeneral");
+  const showChatPreferencesTab = isFeatureVisible(
+    "userSettingsChatPreferences"
+  );
+  const showConnectorsTab = isFeatureVisible("userSettingsConnectors");
 
   return (
     <AppLayouts.Root>
@@ -39,18 +47,22 @@ export default function Layout({ children }: LayoutProps) {
               data-testid="settings-left-tab-navigation"
               className="flex flex-col px-2 min-w-50"
             >
-              <SidebarTab
-                href="/app/settings/general"
-                selected={pathname === "/app/settings/general"}
-              >
-                General
-              </SidebarTab>
-              <SidebarTab
-                href="/app/settings/chat-preferences"
-                selected={pathname === "/app/settings/chat-preferences"}
-              >
-                Chat Preferences
-              </SidebarTab>
+              {showGeneralTab && (
+                <SidebarTab
+                  href="/app/settings/general"
+                  selected={pathname === "/app/settings/general"}
+                >
+                  General
+                </SidebarTab>
+              )}
+              {showChatPreferencesTab && (
+                <SidebarTab
+                  href="/app/settings/chat-preferences"
+                  selected={pathname === "/app/settings/chat-preferences"}
+                >
+                  Chat Preferences
+                </SidebarTab>
+              )}
               {showAccountsAccessTab && (
                 <SidebarTab
                   href="/app/settings/accounts-access"
@@ -59,12 +71,14 @@ export default function Layout({ children }: LayoutProps) {
                   Accounts & Access
                 </SidebarTab>
               )}
-              <SidebarTab
-                href="/app/settings/connectors"
-                selected={pathname === "/app/settings/connectors"}
-              >
-                Connectors
-              </SidebarTab>
+              {showConnectorsTab && (
+                <SidebarTab
+                  href="/app/settings/connectors"
+                  selected={pathname === "/app/settings/connectors"}
+                >
+                  Connectors
+                </SidebarTab>
+              )}
             </div>
 
             {/* Right: Tab Content */}

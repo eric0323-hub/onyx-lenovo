@@ -5,6 +5,7 @@ import { requireAuth } from "@/lib/auth/requireAuth";
 import { ProjectsProvider } from "@/providers/ProjectsContext";
 import { VoiceModeProvider } from "@/providers/VoiceModeProvider";
 import AppSidebar from "@/sections/sidebar/AppSidebar";
+import { redirectIfCurrentFeatureIsHidden } from "@/lib/featureVisibilitySS";
 
 export interface LayoutProps {
   children: React.ReactNode;
@@ -12,6 +13,8 @@ export interface LayoutProps {
 
 export default async function Layout({ children }: LayoutProps) {
   noStore();
+
+  await redirectIfCurrentFeatureIsHidden();
 
   // Only check authentication - data fetching is done client-side via SWR hooks
   const authResult = await requireAuth();

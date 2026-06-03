@@ -80,6 +80,7 @@ import { paidTierGated } from "@/ce";
 import EESearchUI from "@/ee/sections/SearchUI";
 const SearchUI = paidTierGated(EESearchUI);
 import { motion, AnimatePresence } from "motion/react";
+import { isFeatureVisible } from "@/lib/featureVisibility";
 
 interface FadeProps {
   show: boolean;
@@ -178,6 +179,9 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
   const { data: federatedConnectorsData } = useFederatedConnectors();
 
   const { user } = useUser();
+  const showDeepResearch = isFeatureVisible("deepResearch");
+  const showFileUploads = isFeatureVisible("fileUploads");
+  const showProjects = isFeatureVisible("projects");
 
   function processSearchParamsAndSubmitMessage(searchParamsString: string) {
     const newSearchParams = new URLSearchParams(searchParamsString);
@@ -222,7 +226,7 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
     agentId: selectedAgent?.id,
   });
   const deepResearchEnabledForCurrentWorkflow =
-    currentProjectId === null && deepResearchEnabled;
+    showDeepResearch && currentProjectId === null && deepResearchEnabled;
 
   const [presentingDocument, setPresentingDocument] =
     useState<MinimalOnyxDocument | null>(null);
@@ -402,6 +406,13 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
   const isStreaming = currentChatState === "streaming";
 
   const multiModel = useMultiModelChat(llmManager);
+  const showMultiModelChat = isFeatureVisible("multiModelChat");
+  const isMultiModelActive =
+    showMultiModelChat && multiModel.isMultiModelActive;
+  const selectedModelsForSubmission = useMemo(
+    () => (isMultiModelActive ? multiModel.selectedModels : undefined),
+    [isMultiModelActive, multiModel.selectedModels]
+  );
 
   // Auto-fold sidebar when a multi-model message is submitted.
   // Stays collapsed until the user exits multi-model mode (removes models).
@@ -417,15 +428,12 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
 
   // Restore sidebar when user exits multi-model mode
   useEffect(() => {
-    if (
-      !multiModel.isMultiModelActive &&
-      preMultiModelFoldedRef.current !== null
-    ) {
+    if (!isMultiModelActive && preMultiModelFoldedRef.current !== null) {
       setFolded(preMultiModelFoldedRef.current);
       preMultiModelFoldedRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [multiModel.isMultiModelActive]);
+  }, [isMultiModelActive]);
 
   // Sync single-model selection to llmManager so the submission path uses
   // the correct provider/version. Guard against echoing derived state back
@@ -525,7 +533,7 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
       message: lastUserMsg.message,
       currentMessageFiles: currentMessageFiles,
       deepResearch:
-        deepResearchEnabledForCurrentWorkflow && !multiModel.isMultiModelActive,
+        deepResearchEnabledForCurrentWorkflow && !isMultiModelActive,
       messageIdToResend: lastUserMsg.messageId,
     });
   }, [
@@ -533,7 +541,7 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
     onSubmit,
     currentMessageFiles,
     deepResearchEnabledForCurrentWorkflow,
-    multiModel.isMultiModelActive,
+    isMultiModelActive,
   ]);
 
   const toggleDocumentSidebar = useCallback(() => {
@@ -550,7 +558,7 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
 
   const onChat = useCallback(
     (message: string) => {
-      if (multiModel.isMultiModelActive) {
+      if (isMultiModelActive) {
         foldSidebarForMultiModel();
       }
       resetInputBar();
@@ -558,11 +566,8 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
         message,
         currentMessageFiles,
         deepResearch:
-          deepResearchEnabledForCurrentWorkflow &&
-          !multiModel.isMultiModelActive,
-        selectedModels: multiModel.isMultiModelActive
-          ? multiModel.selectedModels
-          : undefined,
+          deepResearchEnabledForCurrentWorkflow && !isMultiModelActive,
+        selectedModels: selectedModelsForSubmission,
       });
       if (showOnboarding || !onboardingDismissed) {
         finishOnboarding();
@@ -573,8 +578,8 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
       onSubmit,
       currentMessageFiles,
       deepResearchEnabledForCurrentWorkflow,
-      multiModel.isMultiModelActive,
-      multiModel.selectedModels,
+      isMultiModelActive,
+      selectedModelsForSubmission,
       foldSidebarForMultiModel,
       showOnboarding,
       onboardingDismissed,
@@ -614,11 +619,8 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
           message,
           currentMessageFiles,
           deepResearch:
-            deepResearchEnabledForCurrentWorkflow &&
-            !multiModel.isMultiModelActive,
-          selectedModels: multiModel.isMultiModelActive
-            ? multiModel.selectedModels
-            : undefined,
+            deepResearchEnabledForCurrentWorkflow && !isMultiModelActive,
+          selectedModels: selectedModelsForSubmission,
         });
         if (showOnboarding || !onboardingDismissed) {
           finishOnboarding();
@@ -643,8 +645,8 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
       showOnboarding,
       onboardingDismissed,
       finishOnboarding,
-      multiModel.isMultiModelActive,
-      multiModel.selectedModels,
+      isMultiModelActive,
+      selectedModelsForSubmission,
     ]
   );
 
@@ -720,7 +722,7 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
       ? "0fr auto 1fr"
       : appFocus.isChat()
         ? "1fr auto 0fr"
-        : appFocus.isProject()
+        : showProjects && appFocus.isProject()
           ? "auto auto 1fr"
           : "1fr auto 1fr",
   };
@@ -770,10 +772,13 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
 
       <AppLayouts.Root enableBackground={!appFocus.isProject()}>
         <Dropzone
-          onDrop={(acceptedFiles) =>
-            handleMessageSpecificFileUpload(acceptedFiles)
-          }
+          onDrop={(acceptedFiles) => {
+            if (showFileUploads) {
+              handleMessageSpecificFileUpload(acceptedFiles);
+            }
+          }}
           noClick
+          disabled={!showFileUploads}
         >
           {({ getRootProps }) => (
             <div
@@ -818,7 +823,9 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
                         stopGenerating={stopGenerating}
                         onResubmit={handleResubmitLastMessage}
                         anchorNodeId={anchorNodeId}
-                        selectedModels={multiModel.selectedModels}
+                        selectedModels={
+                          showMultiModelChat ? multiModel.selectedModels : []
+                        }
                       />
                     </ChatScrollContainer>
                   </Fade>
@@ -863,7 +870,7 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
                   </Fade>
 
                   {/* ProjectUI */}
-                  {appFocus.isProject() && (
+                  {showProjects && appFocus.isProject() && (
                     <div className="w-full max-h-[50vh] overflow-y-auto overscroll-y-none">
                       <ProjectContextPanel
                         projectTokenCount={projectContextTokenCount}
@@ -896,7 +903,8 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
                           state.phase === "idle" && state.appMode === "search"
                         ) &&
                         liveAgent &&
-                        !llmManager.isLoadingProviders && (
+                        !llmManager.isLoadingProviders &&
+                        showMultiModelChat && (
                           <ModelSelector
                             llmManager={llmManager}
                             selectedModels={multiModel.selectedModels}
@@ -972,7 +980,8 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
                       />
                       {appFocus.isChat() &&
                         liveAgent &&
-                        !llmManager.isLoadingProviders && (
+                        !llmManager.isLoadingProviders &&
+                        showMultiModelChat && (
                           <div className="pb-1">
                             <ModelSelector
                               llmManager={llmManager}
@@ -989,7 +998,7 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
                           deepResearchEnabledForCurrentWorkflow
                         }
                         toggleDeepResearch={toggleDeepResearch}
-                        isMultiModelActive={multiModel.isMultiModelActive}
+                        isMultiModelActive={isMultiModelActive}
                         filterManager={filterManager}
                         llmManager={llmManager}
                         initialMessage={
@@ -1042,7 +1051,7 @@ export default function AppPage({ firstMessage }: ChatPageProps) {
                       </>
                     )}
                   {/* ProjectChatSessionList */}
-                  {appFocus.isProject() && (
+                  {showProjects && appFocus.isProject() && (
                     <div className="w-full max-w-(--app-page-main-content-width) h-full overflow-y-auto overscroll-y-none mx-auto">
                       <ProjectChatSessionList />
                     </div>

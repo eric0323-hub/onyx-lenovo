@@ -29,6 +29,7 @@ import {
   SvgKeystroke,
 } from "@opal/icons";
 import TextSeparator from "@/refresh-components/TextSeparator";
+import { isFeatureVisible } from "@/lib/featureVisibility";
 
 /**
  * Dynamic footer that shows contextual action labels based on highlighted item type
@@ -80,6 +81,8 @@ export default function ChatSearchCommandMenu({
   const combinedSettings = useSettingsContext();
   const currentAgent = useCurrentAgent();
   const createProjectModal = useCreateModal();
+  const showAgents = isFeatureVisible("agents");
+  const showProjects = isFeatureVisible("projects");
 
   // Constants for preview limits
   const PREVIEW_CHATS_LIMIT = 4;
@@ -155,16 +158,18 @@ export default function ChatSearchCommandMenu({
   // Navigation handlers
   const handleNewSession = useCallback(() => {
     const href =
-      combinedSettings?.settings?.disable_default_assistant && currentAgent
+      combinedSettings?.settings?.disable_default_assistant &&
+      currentAgent &&
+      showAgents
         ? `/app?agentId=${currentAgent.id}`
         : "/app";
     router.push(href as Route);
     setOpen(false);
-  }, [router, combinedSettings, currentAgent]);
+  }, [router, combinedSettings, currentAgent, showAgents]);
 
   const handleChatSelect = useCallback(
     (chatId: string) => {
-      router.push(`/chat?chatId=${chatId}` as Route);
+      router.push(`/app?chatId=${chatId}` as Route);
       setOpen(false);
     },
     [router]
@@ -172,7 +177,7 @@ export default function ChatSearchCommandMenu({
 
   const handleProjectSelect = useCallback(
     (projectId: number) => {
-      router.push(`/chat?projectId=${projectId}` as Route);
+      router.push(`/app?projectId=${projectId}` as Route);
       setOpen(false);
     },
     [router]
@@ -293,54 +298,56 @@ export default function ChatSearchCommandMenu({
               )}
 
             {/* Projects section - show if filter is 'all' or 'projects' */}
-            {(activeFilter === "all" || activeFilter === "projects") && (
-              <>
-                <CommandMenu.Filter
-                  value="projects"
-                  onSelect={() => setActiveFilter("projects")}
-                  isApplied={
-                    activeFilter === "projects" ||
-                    filteredProjects.length <= PREVIEW_PROJECTS_LIMIT
-                  }
-                >
-                  Projects
-                </CommandMenu.Filter>
-                {/* New Project action - shown after Projects filter when no search term */}
-                {!hasSearchValue && activeFilter === "all" && (
-                  <CommandMenu.Action
-                    value="new-project"
-                    icon={SvgFolderPlus}
-                    onSelect={() => handleNewProject()}
-                  >
-                    New Project
-                  </CommandMenu.Action>
-                )}
-                {displayedProjects.map((project) => (
-                  <CommandMenu.Item
-                    key={project.id}
-                    value={`project-${project.id}`}
-                    icon={SvgFolder}
-                    rightContent={({ isHighlighted }) =>
-                      isHighlighted ? (
-                        <Text figureKeystroke text02>
-                          ↵
-                        </Text>
-                      ) : (
-                        <Text secondaryBody text03>
-                          {formatDisplayTime(project.time)}
-                        </Text>
-                      )
+            {showProjects &&
+              (activeFilter === "all" || activeFilter === "projects") && (
+                <>
+                  <CommandMenu.Filter
+                    value="projects"
+                    onSelect={() => setActiveFilter("projects")}
+                    isApplied={
+                      activeFilter === "projects" ||
+                      filteredProjects.length <= PREVIEW_PROJECTS_LIMIT
                     }
-                    onSelect={() => handleProjectSelect(project.id)}
                   >
-                    {highlightMatch(project.label, searchValue)}
-                  </CommandMenu.Item>
-                ))}
-              </>
-            )}
+                    Projects
+                  </CommandMenu.Filter>
+                  {/* New Project action - shown after Projects filter when no search term */}
+                  {!hasSearchValue && activeFilter === "all" && (
+                    <CommandMenu.Action
+                      value="new-project"
+                      icon={SvgFolderPlus}
+                      onSelect={() => handleNewProject()}
+                    >
+                      New Project
+                    </CommandMenu.Action>
+                  )}
+                  {displayedProjects.map((project) => (
+                    <CommandMenu.Item
+                      key={project.id}
+                      value={`project-${project.id}`}
+                      icon={SvgFolder}
+                      rightContent={({ isHighlighted }) =>
+                        isHighlighted ? (
+                          <Text figureKeystroke text02>
+                            ↵
+                          </Text>
+                        ) : (
+                          <Text secondaryBody text03>
+                            {formatDisplayTime(project.time)}
+                          </Text>
+                        )
+                      }
+                      onSelect={() => handleProjectSelect(project.id)}
+                    >
+                      {highlightMatch(project.label, searchValue)}
+                    </CommandMenu.Item>
+                  ))}
+                </>
+              )}
 
             {/* Create New Project with search term - shown at bottom when searching */}
             {hasSearchValue &&
+              showProjects &&
               (activeFilter === "all" || activeFilter === "projects") && (
                 <CommandMenu.Action
                   value="create-project-with-name"

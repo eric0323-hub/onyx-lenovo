@@ -18,6 +18,7 @@ import useFilter from "@/hooks/useFilter";
 import { IconFunctionComponent } from "@opal/types";
 import AccountPopover from "@/sections/sidebar/AccountPopover";
 import { useSidebarState } from "@/layouts/sidebar-layouts";
+import { isAdminRouteVisible } from "@/lib/featureVisibility";
 
 const SECTIONS = {
   UNLABELED: "",
@@ -45,6 +46,9 @@ function buildItems(
   const items: SidebarItemEntry[] = [];
 
   const add = (section: string, route: Parameters<typeof sidebarItem>[0]) => {
+    if (!isAdminRouteVisible(route)) {
+      return;
+    }
     items.push({ ...sidebarItem(route), section });
   };
 
@@ -70,11 +74,13 @@ function buildItems(
     add(SECTIONS.DOCUMENTS_AND_KNOWLEDGE, ADMIN_ROUTES.ADD_CONNECTOR);
     add(SECTIONS.DOCUMENTS_AND_KNOWLEDGE, ADMIN_ROUTES.DOCUMENT_SETS);
     if (!isCurator) {
-      items.push({
-        ...sidebarItem(ADMIN_ROUTES.INDEX_SETTINGS),
-        section: SECTIONS.DOCUMENTS_AND_KNOWLEDGE,
-        error: settings?.settings.needs_reindexing,
-      });
+      if (isAdminRouteVisible(ADMIN_ROUTES.INDEX_SETTINGS)) {
+        items.push({
+          ...sidebarItem(ADMIN_ROUTES.INDEX_SETTINGS),
+          section: SECTIONS.DOCUMENTS_AND_KNOWLEDGE,
+          error: settings?.settings.needs_reindexing,
+        });
+      }
     }
   }
 

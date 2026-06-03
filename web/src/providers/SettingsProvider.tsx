@@ -19,6 +19,7 @@ import { HOST_URL, NEXT_PUBLIC_CLOUD_ENABLED } from "@/lib/constants";
 import CloudError from "@/components/errorPages/CloudErrorPage";
 import ErrorPage from "@/components/errorPages/ErrorPage";
 import { FetchError } from "@/lib/fetcher";
+import { isFeatureVisible } from "@/lib/featureVisibility";
 
 export function SettingsProvider({
   children,
@@ -74,7 +75,10 @@ export function SettingsProvider({
    * consumers don't need to independently verify availability.
    */
   const isSearchModeAvailable = useMemo(
-    () => settings.search_ui_enabled !== false && ccPairs.length > 0,
+    () =>
+      isFeatureVisible("searchMode") &&
+      settings.search_ui_enabled !== false &&
+      ccPairs.length > 0,
     [settings.search_ui_enabled, ccPairs.length]
   );
 

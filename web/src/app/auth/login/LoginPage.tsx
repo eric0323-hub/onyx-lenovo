@@ -8,6 +8,7 @@ import { AuthType, NEXT_PUBLIC_FORGOT_PASSWORD_ENABLED } from "@/lib/constants";
 import { useSendAuthRequiredMessage } from "@/lib/extension/utils";
 import Text from "@/refresh-components/texts/Text";
 import { Button, MessageCard } from "@opal/components";
+import { isFeatureVisible } from "@/lib/featureVisibility";
 
 interface LoginPageProps {
   authUrl: string | null;
@@ -27,6 +28,8 @@ export default function LoginPage({
   isFirstUser,
 }: LoginPageProps) {
   useSendAuthRequiredMessage();
+  const showPasswordReset = isFeatureVisible("authPasswordReset");
+  const showSignup = isFeatureVisible("authSignup");
 
   // Honor any existing nextUrl; only default to new team flow for first users with no nextUrl
   const effectiveNextUrl =
@@ -73,7 +76,7 @@ export default function LoginPage({
             </>
           )}
           <EmailPasswordForm shouldVerify={true} nextUrl={effectiveNextUrl} />
-          {NEXT_PUBLIC_FORGOT_PASSWORD_ENABLED && (
+          {showPasswordReset && NEXT_PUBLIC_FORGOT_PASSWORD_ENABLED && (
             <Button href="/auth/forgot-password">Reset Password</Button>
           )}
         </div>
@@ -86,7 +89,7 @@ export default function LoginPage({
         </div>
       )}
 
-      {!hidePageRedirect && (
+      {!hidePageRedirect && showSignup && (
         <p className="text-center mt-4">
           Don&apos;t have an account?{" "}
           <span

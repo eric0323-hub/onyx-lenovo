@@ -42,6 +42,7 @@ import {
 } from "@opal/icons";
 import useOnMount from "@/hooks/useOnMount";
 import { useAgents, usePinnedAgents } from "@/lib/agents/hooks";
+import { isFeatureVisible } from "@/lib/featureVisibility";
 
 export interface PopoverSearchInputProps {
   setShowMoveOptions: (show: boolean) => void;
@@ -131,6 +132,7 @@ const ChatButton = memo(
     const { agents } = useAgents();
     const { pinnedAgents, togglePinnedAgent } = usePinnedAgents();
     const [popoverOpen, setPopoverOpen] = useState(false);
+    const showChatSharing = isFeatureVisible("chatSharing");
     const [pendingMoveProjectId, setPendingMoveProjectId] = useState<
       number | null
     >(null);
@@ -188,14 +190,16 @@ const ChatButton = memo(
     useEffect(() => {
       if (!showMoveOptions) {
         const popoverItems = [
-          <LineItemButton
-            key="share"
-            sizePreset="main-ui"
-            rounding="sm"
-            icon={SvgShare}
-            title="Share"
-            onClick={noProp(() => setShowShareModal(true))}
-          />,
+          showChatSharing && (
+            <LineItemButton
+              key="share"
+              sizePreset="main-ui"
+              rounding="sm"
+              icon={SvgShare}
+              title="Share"
+              onClick={noProp(() => setShowShareModal(true))}
+            />
+          ),
           <LineItemButton
             key="rename"
             sizePreset="main-ui"
@@ -285,6 +289,7 @@ const ChatButton = memo(
       chatSession.id,
       searchTerm,
       createProject,
+      showChatSharing,
     ]);
 
     // Pin the chat's agent when clicking on the conversation
@@ -507,7 +512,7 @@ const ChatButton = memo(
           />
         )}
 
-        {showShareModal && (
+        {showChatSharing && showShareModal && (
           <ShareChatSessionModal
             chatSession={chatSession}
             onClose={() => setShowShareModal(false)}

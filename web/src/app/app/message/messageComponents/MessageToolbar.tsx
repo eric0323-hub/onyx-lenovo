@@ -32,6 +32,7 @@ import { Button, SelectButton } from "@opal/components";
 import TTSButton from "./TTSButton";
 import { useVoiceMode } from "@/providers/VoiceModeProvider";
 import { useVoiceStatus } from "@/hooks/useVoiceStatus";
+import { isFeatureVisible } from "@/lib/featureVisibility";
 
 // Wrapper component for SourceTag in toolbar to handle memoization
 const SourcesTagWrapper = React.memo(function SourcesTagWrapper({
@@ -151,6 +152,9 @@ export default function MessageToolbar({
   const { isTTSPlaying, activeMessageNodeId, isAwaitingAutoPlaybackStart } =
     useVoiceMode();
   const { ttsEnabled } = useVoiceStatus();
+  const showFeedbackControls = isFeatureVisible("feedbackControls");
+  const showSourceCitations = isFeatureVisible("sourceCitations");
+  const showVoicePlayback = isFeatureVisible("voicePlayback");
   const isTTSActiveForThisMessage =
     (isTTSPlaying || isAwaitingAutoPlaybackStart) &&
     activeMessageNodeId === nodeId;
@@ -262,29 +266,33 @@ export default function MessageToolbar({
               getHtmlContent={() => finalAnswerRef.current?.innerHTML || ""}
               data-testid="AgentMessage/copy-button"
             />
-            <SelectButton
-              icon={SvgThumbsUp}
-              onClick={() => handleFeedbackClick("like")}
-              variant="select-light"
-              state={isFeedbackTransient("like") ? "selected" : "empty"}
-              tooltip={
-                currentFeedback === "like" ? "Remove Like" : "Good Response"
-              }
-              data-testid="AgentMessage/like-button"
-            />
-            <SelectButton
-              icon={SvgThumbsDown}
-              onClick={() => handleFeedbackClick("dislike")}
-              variant="select-light"
-              state={isFeedbackTransient("dislike") ? "selected" : "empty"}
-              tooltip={
-                currentFeedback === "dislike"
-                  ? "Remove Dislike"
-                  : "Bad Response"
-              }
-              data-testid="AgentMessage/dislike-button"
-            />
-            {ttsEnabled && (
+            {showFeedbackControls && (
+              <>
+                <SelectButton
+                  icon={SvgThumbsUp}
+                  onClick={() => handleFeedbackClick("like")}
+                  variant="select-light"
+                  state={isFeedbackTransient("like") ? "selected" : "empty"}
+                  tooltip={
+                    currentFeedback === "like" ? "Remove Like" : "Good Response"
+                  }
+                  data-testid="AgentMessage/like-button"
+                />
+                <SelectButton
+                  icon={SvgThumbsDown}
+                  onClick={() => handleFeedbackClick("dislike")}
+                  variant="select-light"
+                  state={isFeedbackTransient("dislike") ? "selected" : "empty"}
+                  tooltip={
+                    currentFeedback === "dislike"
+                      ? "Remove Dislike"
+                      : "Bad Response"
+                  }
+                  data-testid="AgentMessage/dislike-button"
+                />
+              </>
+            )}
+            {showVoicePlayback && ttsEnabled && (
               <TTSButton
                 text={
                   removeThinkingTokens(getTextContent(rawPackets)) as string
@@ -313,21 +321,23 @@ export default function MessageToolbar({
                 </div>
               )}
 
-            {nodeId && (citations.length > 0 || documentMap.size > 0) && (
-              <SourcesTagWrapper
-                citations={citations}
-                documentMap={documentMap}
-                nodeId={nodeId}
-                selectedMessageForDocDisplay={selectedMessageForDocDisplay}
-                documentSidebarVisible={documentSidebarVisible}
-                updateCurrentDocumentSidebarVisible={
-                  updateCurrentDocumentSidebarVisible
-                }
-                updateCurrentSelectedNodeForDocDisplay={
-                  updateCurrentSelectedNodeForDocDisplay
-                }
-              />
-            )}
+            {showSourceCitations &&
+              nodeId &&
+              (citations.length > 0 || documentMap.size > 0) && (
+                <SourcesTagWrapper
+                  citations={citations}
+                  documentMap={documentMap}
+                  nodeId={nodeId}
+                  selectedMessageForDocDisplay={selectedMessageForDocDisplay}
+                  documentSidebarVisible={documentSidebarVisible}
+                  updateCurrentDocumentSidebarVisible={
+                    updateCurrentDocumentSidebarVisible
+                  }
+                  updateCurrentSelectedNodeForDocDisplay={
+                    updateCurrentSelectedNodeForDocDisplay
+                  }
+                />
+              )}
           </div>
         </TooltipGroup>
       </div>

@@ -68,6 +68,7 @@ import {
   useChatSessionStore,
 } from "@/app/app/stores/useChatSessionStore";
 import QueuedMessageBar from "@/sections/input/QueuedMessageBar";
+import { isFeatureVisible } from "@/lib/featureVisibility";
 
 export interface AppInputBarHandle {
   reset: () => void;
@@ -188,8 +189,13 @@ const AppInputBar = React.memo(
       toggleTTSMute,
     } = useVoiceMode();
     const { sttEnabled } = useVoiceStatus();
+    const showAgentActions = isFeatureVisible("agentActions");
+    const showDeepResearchFeature = isFeatureVisible("deepResearch");
+    const showFileUploads = isFeatureVisible("fileUploads");
+    const showPromptShortcuts = isFeatureVisible("promptShortcuts");
+    const showVoiceInput = isFeatureVisible("voiceInput");
     // Show mic button: always if STT configured, or greyed-out for admins to prompt setup
-    const showMicButton = sttEnabled || isAdmin;
+    const showMicButton = showVoiceInput && (sttEnabled || isAdmin);
     const isVoicePlaybackActive =
       isTTSPlaying || isTTSLoading || isAwaitingAutoPlaybackStart;
     const isVoicePlaybackControllable = isVoicePlaybackActive && !isRecording;
@@ -370,7 +376,7 @@ const AppInputBar = React.memo(
     function handlePaste(event: React.ClipboardEvent) {
       if (disabled) return;
       const pastedFiles = getPastedFilesIfNoText(event.clipboardData);
-      if (pastedFiles.length > 0) {
+      if (showFileUploads && pastedFiles.length > 0) {
         event.preventDefault();
         handleFileUpload(pastedFiles);
         return;
@@ -445,7 +451,7 @@ const AppInputBar = React.memo(
     const handleContentEditableInput = useCallback(
       (event: React.SyntheticEvent<HTMLDivElement>) => {
         const text = handleInput(event);
-        if (text.startsWith("/")) {
+        if (showPromptShortcuts && text.startsWith("/")) {
           setShowPrompts(true);
           setPromptFilterQuery(text.slice(1));
         } else {
@@ -453,7 +459,7 @@ const AppInputBar = React.memo(
           setPromptFilterQuery("");
         }
       },
-      [handleInput, hidePrompts, setPromptFilterQuery]
+      [handleInput, hidePrompts, setPromptFilterQuery, showPromptShortcuts]
     );
 
     // Determine if we should hide processing state based on context limits
@@ -491,6 +497,7 @@ const AppInputBar = React.memo(
       // https://linear.app/onyx-app/issue/ENG-3818/re-enable-deep-research-in-projects
       return (
         !isProjectWorkflow &&
+        showDeepResearchFeature &&
         deepResearchGloballyEnabled &&
         hasSearchToolsAvailable(selectedAgent?.tools || [])
       );
@@ -498,12 +505,18 @@ const AppInputBar = React.memo(
       selectedAgent?.tools,
       combinedSettings?.settings?.deep_research_enabled,
       currentProjectId,
+      showDeepResearchFeature,
     ]);
 
     function handleKeyDownForPromptShortcuts(
       e: React.KeyboardEvent<HTMLDivElement>
     ) {
-      if (!user?.preferences?.shortcut_enabled || !showPrompts) return;
+      if (
+        !showPromptShortcuts ||
+        !user?.preferences?.shortcut_enabled ||
+        !showPrompts
+      )
+        return;
 
       if (e.key === "Enter") {
         e.preventDefault();
@@ -551,37 +564,39 @@ const AppInputBar = React.memo(
         {/* Bottom left controls */}
         <div className="flex flex-row items-center">
           {/* (+) button - always visible */}
-          <FilePickerPopover
-            onFileClick={handleFileClick}
-            onPickRecent={(file: ProjectFile) => {
-              // Check if file with same ID already exists
-              if (
-                !currentMessageFiles.some(
-                  (existingFile) => existingFile.file_id === file.file_id
-                )
-              ) {
-                setCurrentMessageFiles((prev) => [...prev, file]);
-              }
-            }}
-            onUnpickRecent={(file: ProjectFile) => {
-              setCurrentMessageFiles((prev) =>
-                prev.filter(
-                  (existingFile) => existingFile.file_id !== file.file_id
-                )
-              );
-            }}
-            handleUploadChange={handleUploadChange}
-            trigger={(open) => (
-              <Button
-                disabled={disabled}
-                icon={SvgPaperclip}
-                tooltip="Attach Files"
-                interaction={open ? "hover" : "rest"}
-                prominence="tertiary"
-              />
-            )}
-            selectedFileIds={currentMessageFiles.map((f) => f.id)}
-          />
+          {showFileUploads && (
+            <FilePickerPopover
+              onFileClick={handleFileClick}
+              onPickRecent={(file: ProjectFile) => {
+                // Check if file with same ID already exists
+                if (
+                  !currentMessageFiles.some(
+                    (existingFile) => existingFile.file_id === file.file_id
+                  )
+                ) {
+                  setCurrentMessageFiles((prev) => [...prev, file]);
+                }
+              }}
+              onUnpickRecent={(file: ProjectFile) => {
+                setCurrentMessageFiles((prev) =>
+                  prev.filter(
+                    (existingFile) => existingFile.file_id !== file.file_id
+                  )
+                );
+              }}
+              handleUploadChange={handleUploadChange}
+              trigger={(open) => (
+                <Button
+                  disabled={disabled}
+                  icon={SvgPaperclip}
+                  tooltip="Attach Files"
+                  interaction={open ? "hover" : "rest"}
+                  prominence="tertiary"
+                />
+              )}
+              selectedFileIds={currentMessageFiles.map((f) => f.id)}
+            />
+          )}
 
           {/* Controls that load in when data is ready */}
           <div
@@ -591,14 +606,16 @@ const AppInputBar = React.memo(
               controlsLoading && "invisible"
             )}
           >
-            {selectedAgent && selectedAgent.tools.length > 0 && (
-              <ActionsPopover
-                selectedAgent={selectedAgent}
-                filterManager={filterManager}
-                availableSources={memoizedAvailableSources}
-                disabled={disabled}
-              />
-            )}
+            {showAgentActions &&
+              selectedAgent &&
+              selectedAgent.tools.length > 0 && (
+                <ActionsPopover
+                  selectedAgent={selectedAgent}
+                  filterManager={filterManager}
+                  availableSources={memoizedAvailableSources}
+                  disabled={disabled}
+                />
+              )}
             {onToggleTabReading ? (
               <SelectButton
                 disabled={disabled}
@@ -820,7 +837,11 @@ const AppInputBar = React.memo(
 
             <div className="flex flex-row items-center w-full">
               <Popover
-                open={user?.preferences?.shortcut_enabled && showPrompts}
+                open={
+                  showPromptShortcuts &&
+                  user?.preferences?.shortcut_enabled &&
+                  showPrompts
+                }
                 onOpenChange={setShowPrompts}
               >
                 <Popover.Anchor asChild>

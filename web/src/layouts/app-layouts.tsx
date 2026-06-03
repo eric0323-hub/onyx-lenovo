@@ -66,6 +66,7 @@ import { useTierAtLeast } from "@/hooks/useTierAtLeast";
 import { Tier } from "@/interfaces/settings";
 import useBrowserInfo from "@/hooks/useBrowserInfo";
 import { APP_MARKETING_URL, APP_SLOGAN } from "@/lib/constants";
+import { isFeatureVisible } from "@/lib/featureVisibility";
 
 /**
  * App Header Component
@@ -109,6 +110,8 @@ function Header() {
     useChatSessions();
   const router = useRouter();
   const appFocus = useAppFocus();
+  const showChatSharing = isFeatureVisible("chatSharing");
+  const showProjects = isFeatureVisible("projects");
 
   const customHeaderContent =
     settings?.enterpriseSettings?.custom_header_content;
@@ -214,31 +217,37 @@ function Header() {
   useEffect(() => {
     const items = showMoveOptions
       ? [
-          <PopoverSearchInput
-            key="search"
-            setShowMoveOptions={setShowMoveOptions}
-            onSearch={setSearchTerm}
-          />,
-          ...filteredProjects.map((project) => (
+          showProjects && (
+            <PopoverSearchInput
+              key="search"
+              setShowMoveOptions={setShowMoveOptions}
+              onSearch={setSearchTerm}
+            />
+          ),
+          ...(showProjects
+            ? filteredProjects.map((project) => (
+                <LineItemButton
+                  key={project.id}
+                  sizePreset="main-ui"
+                  rounding="sm"
+                  icon={SvgFolderIn}
+                  title={project.name}
+                  onClick={noProp(() => handleMoveClick(project.id))}
+                />
+              ))
+            : []),
+        ]
+      : [
+          showProjects && (
             <LineItemButton
-              key={project.id}
+              key="move"
               sizePreset="main-ui"
               rounding="sm"
               icon={SvgFolderIn}
-              title={project.name}
-              onClick={noProp(() => handleMoveClick(project.id))}
+              title="Move to Project"
+              onClick={noProp(() => setShowMoveOptions(true))}
             />
-          )),
-        ]
-      : [
-          <LineItemButton
-            key="move"
-            sizePreset="main-ui"
-            rounding="sm"
-            icon={SvgFolderIn}
-            title="Move to Project"
-            onClick={noProp(() => setShowMoveOptions(true))}
-          />,
+          ),
           <LineItemButton
             key="delete"
             sizePreset="main-ui"
@@ -257,11 +266,12 @@ function Header() {
     currentChatSession,
     setDeleteConfirmationModalOpen,
     handleMoveClick,
+    showProjects,
   ]);
 
   return (
     <>
-      {showShareModal && currentChatSession && (
+      {showChatSharing && showShareModal && currentChatSession && (
         <ShareChatSessionModal
           chatSession={currentChatSession}
           onClose={() => setShowShareModal(false)}
@@ -397,16 +407,18 @@ function Header() {
         <div className="flex flex-1 justify-end items-center h-[3.3rem]">
           {appFocus.isChat() && currentChatSession && (
             <FrostedDiv className="flex shrink flex-row items-center">
-              <Button
-                icon={SvgShare}
-                prominence="tertiary"
-                interaction={showShareModal ? "hover" : "rest"}
-                responsiveHideText
-                onClick={() => setShowShareModal(true)}
-                aria-label="share-chat-button"
-              >
-                Share
-              </Button>
+              {showChatSharing && (
+                <Button
+                  icon={SvgShare}
+                  prominence="tertiary"
+                  interaction={showShareModal ? "hover" : "rest"}
+                  responsiveHideText
+                  onClick={() => setShowShareModal(true)}
+                  aria-label="share-chat-button"
+                >
+                  Share
+                </Button>
+              )}
               <SimplePopover
                 trigger={
                   /* TODO(@raunakab): migrate to opal Button once className/iconClassName is resolved */

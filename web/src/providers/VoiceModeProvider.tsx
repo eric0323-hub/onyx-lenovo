@@ -11,6 +11,7 @@ import React, {
 import { useUser } from "@/providers/UserProvider";
 import { useVoiceStatus } from "@/hooks/useVoiceStatus";
 import { INTERNAL_URL, IS_DEV } from "@/lib/constants";
+import { isFeatureVisible } from "@/lib/featureVisibility";
 
 // --- TTS Configuration Constants ---
 
@@ -161,7 +162,9 @@ export function VoiceModeProvider({ children }: { children: React.ReactNode }) {
   const { user } = useUser();
   const { ttsEnabled } = useVoiceStatus();
   const autoPlayback =
-    (user?.preferences?.voice_auto_playback ?? false) && ttsEnabled;
+    isFeatureVisible("voicePlayback") &&
+    (user?.preferences?.voice_auto_playback ?? false) &&
+    ttsEnabled;
   const playbackSpeed = user?.preferences?.voice_playback_speed ?? 1.0;
 
   const [isTTSPlaying, setIsTTSPlaying] = useState(false);

@@ -40,6 +40,7 @@ import UserAvatar from "@/refresh-components/avatars/UserAvatar";
 import useNotifications from "@/hooks/useNotifications";
 import { SvgOnyxLogo } from "@opal/logos";
 import { markdown } from "@opal/utils";
+import { isFeatureVisible } from "@/lib/featureVisibility";
 
 interface SettingsPopoverProps {
   onUserSettingsClick: () => void;
@@ -60,6 +61,8 @@ function SettingsPopover({
     user?.is_anonymous_user || checkUserIsNoAuthUser(user?.id ?? "");
   const showLogout = user && !isAnonymousUser && !LOGOUT_DISABLED;
   const showLogin = isAnonymousUser;
+  const showUserSettings = isFeatureVisible("userSettings");
+  const showNotifications = isFeatureVisible("notifications");
   const versionLabel = `LKnow ${settings?.webVersion ?? "dev"}`;
   const versionTitle = APP_MARKETING_URL
     ? markdown(`[${versionLabel}](${APP_MARKETING_URL})`)
@@ -104,31 +107,35 @@ function SettingsPopover({
           <Content sizePreset="main-ui" title={getUserEmail(user)} />
         </div>,
         null,
-        <div key="user-settings" data-testid="Settings/user-settings">
+        showUserSettings && (
+          <div key="user-settings" data-testid="Settings/user-settings">
+            <LineItemButton
+              sizePreset="main-ui"
+              variant="section"
+              rounding="sm"
+              icon={SvgSliders}
+              title="Settings"
+              href="/app/settings"
+              onClick={onUserSettingsClick}
+            />
+          </div>
+        ),
+        showNotifications && (
           <LineItemButton
+            key="notifications"
             sizePreset="main-ui"
             variant="section"
             rounding="sm"
-            icon={SvgSliders}
-            title="Settings"
-            href="/app/settings"
-            onClick={onUserSettingsClick}
+            icon={SvgBell}
+            title="Notifications"
+            onClick={onOpenNotifications}
+            rightChildren={
+              undismissedCount ? (
+                <SvgNotificationBubble count={undismissedCount} />
+              ) : undefined
+            }
           />
-        </div>,
-        <LineItemButton
-          key="notifications"
-          sizePreset="main-ui"
-          variant="section"
-          rounding="sm"
-          icon={SvgBell}
-          title="Notifications"
-          onClick={onOpenNotifications}
-          rightChildren={
-            undismissedCount ? (
-              <SvgNotificationBubble count={undismissedCount} />
-            ) : undefined
-          }
-        />,
+        ),
         DOCS_BASE_URL && (
           <LineItemButton
             key="help-faq"
@@ -212,6 +219,7 @@ export default function AccountPopover({
   const vectorDbEnabled = useVectorDbEnabled();
   const { undismissedCount } = useNotifications();
   const userDisplayName = getUserDisplayName(user);
+  const showNotifications = isFeatureVisible("notifications");
 
   const handlePopoverOpen = (state: boolean) => {
     if (state) {
@@ -239,7 +247,7 @@ export default function AccountPopover({
               </div>
             )}
             rightChildren={
-              undismissedCount ? (
+              showNotifications && undismissedCount ? (
                 <Section padding={0.5}>
                   <SvgNotificationBubble count={undismissedCount} />
                 </Section>

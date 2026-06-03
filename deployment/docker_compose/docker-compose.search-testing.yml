@@ -93,6 +93,7 @@ services:
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_DISABLE_LOGOUT=${NEXT_PUBLIC_DISABLE_LOGOUT:-}
+        - NEXT_PUBLIC_FEATURE_VISIBILITY_OVERRIDES=${NEXT_PUBLIC_FEATURE_VISIBILITY_OVERRIDES:-}
 
         # Enterprise Edition only
         - NEXT_PUBLIC_THEME=${NEXT_PUBLIC_THEME:-}

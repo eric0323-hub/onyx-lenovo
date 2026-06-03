@@ -80,6 +80,11 @@ import { NotificationType } from "@/lib/notifications/interfaces";
 import AccountPopover from "@/sections/sidebar/AccountPopover";
 import ChatSearchCommandMenu from "@/sections/sidebar/ChatSearchCommandMenu";
 import { useQueryController } from "@/providers/QueryControllerProvider";
+import { ADMIN_ROUTES } from "@/lib/admin-routes";
+import {
+  getFirstVisibleAdminPath,
+  isFeatureVisible,
+} from "@/lib/featureVisibility";
 
 // Visible-agents = pinned-agents + current-agent (if current-agent not in pinned-agents)
 // OR Visible-agents = pinned-agents (if current-agent in pinned-agents)
@@ -102,6 +107,35 @@ function buildVisibleAgents(
 }
 
 const SKELETON_WIDTHS_BASE = ["w-4/5", "w-4/5", "w-3/5"];
+const DEFAULT_ADMIN_ROUTES = [
+  ADMIN_ROUTES.LLM_MODELS,
+  ADMIN_ROUTES.WEB_SEARCH,
+  ADMIN_ROUTES.IMAGE_GENERATION,
+  ADMIN_ROUTES.VOICE,
+  ADMIN_ROUTES.CODE_INTERPRETER,
+  ADMIN_ROUTES.CHAT_PREFERENCES,
+  ADMIN_ROUTES.AGENTS,
+  ADMIN_ROUTES.SKILLS,
+  ADMIN_ROUTES.MCP_ACTIONS,
+  ADMIN_ROUTES.OPENAPI_ACTIONS,
+  ADMIN_ROUTES.INDEXING_STATUS,
+  ADMIN_ROUTES.ADD_CONNECTOR,
+  ADMIN_ROUTES.DOCUMENT_SETS,
+  ADMIN_ROUTES.INDEX_SETTINGS,
+  ADMIN_ROUTES.API_KEYS,
+  ADMIN_ROUTES.SLACK_BOTS,
+  ADMIN_ROUTES.DISCORD_BOTS,
+  ADMIN_ROUTES.USERS,
+  ADMIN_ROUTES.GROUPS,
+  ADMIN_ROUTES.TOKEN_RATE_LIMITS,
+  ADMIN_ROUTES.OBSERVABILITY,
+];
+const DEFAULT_CURATOR_ROUTES = [
+  ADMIN_ROUTES.AGENTS,
+  ADMIN_ROUTES.SKILLS,
+  ADMIN_ROUTES.MCP_ACTIONS,
+  ADMIN_ROUTES.OPENAPI_ACTIONS,
+];
 
 function shuffleWidths(): string[] {
   return [...SKELETON_WIDTHS_BASE].sort(() => Math.random() - 0.5);
@@ -252,7 +286,12 @@ const MemoizedAppSidebarInner = memo(function AppSidebarInner() {
   // Check if Onyx Craft is enabled via settings (backed by PostHog feature flag)
   // Only explicit true enables the feature; false or undefined = disabled
   const isOnyxCraftEnabled =
-    combinedSettings?.settings?.onyx_craft_enabled === true;
+    combinedSettings?.settings?.onyx_craft_enabled === true &&
+    isFeatureVisible("craft");
+  const showAgents = isFeatureVisible("agents");
+  const showProjects = isFeatureVisible("projects");
+  const showChatHistory = isFeatureVisible("chatHistory");
+  const showAdminPanel = isFeatureVisible("adminPanel");
 
   // Find build_mode feature announcement notification (only if Onyx Craft is enabled)
   const buildModeNotification = isOnyxCraftEnabled
@@ -583,12 +622,12 @@ const MemoizedAppSidebarInner = memo(function AppSidebarInner() {
   const settingsButton = useMemo(
     () => (
       <div>
-        {(isAdmin || isCurator) && (
+        {(isAdmin || isCurator) && showAdminPanel && (
           <SidebarTab
             href={
               isCurator
-                ? "/admin/agents"
-                : "/admin/configuration/language-models"
+                ? getFirstVisibleAdminPath(DEFAULT_CURATOR_ROUTES)
+                : getFirstVisibleAdminPath(DEFAULT_ADMIN_ROUTES)
             }
             icon={SvgSettings}
             folded={folded}
@@ -604,7 +643,14 @@ const MemoizedAppSidebarInner = memo(function AppSidebarInner() {
         />
       </div>
     ),
-    [folded, isAdmin, isCurator, handleShowBuildIntro, isOnyxCraftEnabled]
+    [
+      folded,
+      isAdmin,
+      isCurator,
+      showAdminPanel,
+      handleShowBuildIntro,
+      isOnyxCraftEnabled,
+    ]
   );
 
   return (
@@ -672,34 +718,35 @@ const MemoizedAppSidebarInner = memo(function AppSidebarInner() {
       <SidebarLayouts.Header>
         <div className="flex flex-col">
           {newSessionButton}
-          {searchChatsButton}
+          {showChatHistory && searchChatsButton}
           {isOnyxCraftEnabled && buildButton}
-          {folded && moreAgentsButton}
-          {folded && newProjectButton}
+          {folded && showAgents && moreAgentsButton}
+          {folded && showProjects && newProjectButton}
         </div>
       </SidebarLayouts.Header>
 
       <SidebarLayouts.Body scrollKey="app-sidebar">
         {isLoadingDynamicContent ? null : (
           <>
-            {/* Agents */}
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleAgentDragEnd}
-            >
-              <SidebarSection title="Agents">
-                <SortableContext
-                  items={visibleAgentIds}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {visibleAgents.map((visibleAgent) => (
-                    <AgentButton key={visibleAgent.id} agent={visibleAgent} />
-                  ))}
-                </SortableContext>
-                {moreAgentsButton}
-              </SidebarSection>
-            </DndContext>
+            {showAgents && (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleAgentDragEnd}
+              >
+                <SidebarSection title="Agents">
+                  <SortableContext
+                    items={visibleAgentIds}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {visibleAgents.map((visibleAgent) => (
+                      <AgentButton key={visibleAgent.id} agent={visibleAgent} />
+                    ))}
+                  </SortableContext>
+                  {moreAgentsButton}
+                </SidebarSection>
+              </DndContext>
+            )}
 
             {/* Wrap Projects and Recents in a shared DndContext for chat-to-project drag */}
             <DndContext
@@ -711,32 +758,34 @@ const MemoizedAppSidebarInner = memo(function AppSidebarInner() {
               ]}
               onDragEnd={handleChatProjectDragEnd}
             >
-              {/* Projects */}
-              <SidebarSection
-                title="Projects"
-                action={
-                  <OpalButton
-                    icon={SvgFolderPlus}
-                    prominence="tertiary"
-                    size="sm"
-                    tooltip="New Project"
-                    onClick={() => createProjectModal.toggle(true)}
-                  />
-                }
-              >
-                {projects.map((project) => (
-                  <ProjectFolderButton key={project.id} project={project} />
-                ))}
-                {projects.length === 0 && newProjectButton}
-              </SidebarSection>
+              {showProjects && (
+                <SidebarSection
+                  title="Projects"
+                  action={
+                    <OpalButton
+                      icon={SvgFolderPlus}
+                      prominence="tertiary"
+                      size="sm"
+                      tooltip="New Project"
+                      onClick={() => createProjectModal.toggle(true)}
+                    />
+                  }
+                >
+                  {projects.map((project) => (
+                    <ProjectFolderButton key={project.id} project={project} />
+                  ))}
+                  {projects.length === 0 && newProjectButton}
+                </SidebarSection>
+              )}
 
-              {/* Recents */}
-              <RecentsSection
-                chatSessions={chatSessions}
-                hasMore={hasMore}
-                isLoadingMore={isLoadingMore}
-                onLoadMore={loadMore}
-              />
+              {showChatHistory && (
+                <RecentsSection
+                  chatSessions={chatSessions}
+                  hasMore={hasMore}
+                  isLoadingMore={isLoadingMore}
+                  onLoadMore={loadMore}
+                />
+              )}
             </DndContext>
           </>
         )}

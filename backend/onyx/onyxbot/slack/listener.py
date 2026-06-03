@@ -1250,7 +1250,7 @@ def _check_tenant_gated(client: TenantSocketModeClient, req: SocketModeRequest) 
                 channel=channel,
                 thread_ts=thread_ts,
                 text=(
-                    "Your organization's subscription has expired. Please contact your Onyx administrator to restore access."
+                    "Your organization's subscription has expired. Please contact your LKnow administrator to restore access."
                 ),
             )
     logger.info("Blocked Slack request for gated tenant %s", get_current_tenant_id())

@@ -226,7 +226,7 @@ def _build_error_block(error_message: str) -> Block:
     the error without completely breaking
     """
     display_text = (
-        "There was an error displaying all of the Onyx answers."
+        "There was an error displaying all of the LKnow answers."
         f" Please let an admin or an onyx developer know. Error: {error_message}"
     )
     return SectionBlock(text=display_text)

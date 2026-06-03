@@ -44,13 +44,13 @@ def require_onyx_craft_enabled(
     user: User = Depends(require_permission(Permission.BASIC_ACCESS)),
 ) -> User:
     """
-    Dependency that checks if Onyx Craft is enabled for the user.
-    Raises HTTP 403 if Onyx Craft is disabled via feature flag.
+    Dependency that checks if LKnow Craft is enabled for the user.
+    Raises HTTP 403 if LKnow Craft is disabled via feature flag.
     """
     if not is_onyx_craft_enabled(user):
         raise HTTPException(
             status_code=403,
-            detail="Onyx Craft is not available",
+            detail="LKnow Craft is not available",
         )
     return user
 

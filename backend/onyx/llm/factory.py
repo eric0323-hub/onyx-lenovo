@@ -54,7 +54,7 @@ def _build_provider_extra_headers(
     elif provider == LlmProviderNames.OPENROUTER:
         return {
             "HTTP-Referer": "https://onyx.app",
-            "X-Title": "Onyx",
+            "X-Title": "LKnow",
         }
 
     return {}

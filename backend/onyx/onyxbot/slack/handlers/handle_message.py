@@ -255,7 +255,7 @@ def handle_message(
                 client=client,
                 channel=channel,
                 receiver_ids=[sender_id],
-                text="The OnyxBot slash command is not enabled for this channel",
+                text="The LKnowBot slash command is not enabled for this channel",
                 thread_ts=None,
             )
 
@@ -291,7 +291,7 @@ def handle_message(
                             "has reached its user seat limit. Since this is your "
                             "first time interacting with the bot, a new account "
                             "could not be created for you. Please contact your "
-                            "Onyx administrator to add more seats."
+                            "LKnow administrator to add more seats."
                         ),
                     )
                     return False
@@ -328,7 +328,7 @@ def handle_message(
                             "has reached its user seat limit. Your account is "
                             "currently deactivated and cannot be reactivated "
                             "until more seats are available. Please contact "
-                            "your Onyx administrator."
+                            "your LKnow administrator."
                         ),
                     )
                     return False
@@ -364,7 +364,7 @@ def handle_message(
                         text=(
                             "We weren't able to respond because your organization "
                             "has reached its user seat limit. Please contact your "
-                            "Onyx administrator to add more seats."
+                            "LKnow administrator to add more seats."
                         ),
                     )
                     return False
@@ -418,7 +418,7 @@ def handle_message(
                     text=(
                         "We weren't able to respond because your organization "
                         "has reached its user seat limit. Please contact your "
-                        "Onyx administrator to add more seats."
+                        "LKnow administrator to add more seats."
                     ),
                 )
                 return False

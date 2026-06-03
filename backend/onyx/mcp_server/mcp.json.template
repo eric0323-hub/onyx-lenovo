@@ -1,6 +1,6 @@
 {
     "mcpServers": {
-      "Onyx": {
+      "LKnow": {
         "url": "https://cloud.onyx.app/mcp",
         "headers": {
           "Authorization": "Bearer [YOUR PAT OR API KEY HERE]"

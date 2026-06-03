@@ -30,7 +30,7 @@ set_is_ee_based_on_env_variable()
 logger.info("Creating Onyx MCP Server...")
 
 mcp_server = FastMCP(
-    name="Onyx MCP Server",
+    name="LKnow MCP Server",
     version="1.0.0",
     auth=OnyxTokenVerifier(),
 )
@@ -79,7 +79,7 @@ def create_mcp_fastapi_app() -> FastAPI:
             await shutdown_http_client()
 
     app = FastAPI(
-        title="Onyx MCP Server",
+        title="LKnow MCP Server",
         description="HTTP POST transport with bearer auth delegated to API /me",
         version="1.0.0",
         lifespan=combined_lifespan,

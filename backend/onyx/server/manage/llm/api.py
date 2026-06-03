@@ -1264,7 +1264,7 @@ def _get_openrouter_models_response(api_base: str, api_key: str | None) -> dict:
     headers: dict[str, str] = {
         # Optional headers recommended by OpenRouter for attribution
         "HTTP-Referer": "https://onyx.app",
-        "X-Title": "Onyx",
+        "X-Title": "LKnow",
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -1578,7 +1578,7 @@ def _get_openai_compatible_models_response(
     headers = {
         "Authorization": f"Bearer {api_key}",
         "HTTP-Referer": "https://onyx.app",
-        "X-Title": "Onyx",
+        "X-Title": "LKnow",
     }
     if not api_key:
         headers.pop("Authorization")

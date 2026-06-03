@@ -42,7 +42,7 @@ def require_access_token() -> AccessToken:
     access_token = get_access_token()
     if not access_token:
         raise ValueError(
-            "MCP Server requires an Onyx access token to authenticate your request"
+            "MCP Server requires an LKnow access token to authenticate your request"
         )
     return access_token
 

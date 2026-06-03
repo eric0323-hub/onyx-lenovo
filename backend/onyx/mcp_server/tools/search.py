@@ -91,13 +91,13 @@ async def search_indexed_documents(
     skip_query_expansion: bool = False,
 ) -> dict[str, Any]:
     """
-    Search the user's knowledge base indexed in Onyx.
+    Search the user's knowledge base indexed in LKnow.
     Use this tool for information that is not public knowledge and specific to the user,
     their team, their work, or their organization/company.
 
-    Runs the full Onyx search pipeline (LLM query expansion, hybrid retrieval,
+    Runs the full LKnow search pipeline (LLM query expansion, hybrid retrieval,
     document selection, context expansion) — the same search quality as the
-    Onyx chat interface.
+    LKnow chat interface.
 
     To find a list of available sources, use the `indexed_sources` resource.
     `document_set_names` restricts results to documents belonging to the named
@@ -156,7 +156,7 @@ async def search_indexed_documents(
         logger.info("Onyx MCP Server: No indexed sources available for tenant")
         return _error_payload(
             "No document sources are indexed yet. Add connectors or upload data "
-            "through Onyx before calling search_indexed_documents."
+            "through LKnow before calling search_indexed_documents."
         )
 
     # Convert source_types strings to DocumentSource enums; skip unknown values.

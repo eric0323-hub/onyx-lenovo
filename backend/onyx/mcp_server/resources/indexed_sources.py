@@ -16,7 +16,7 @@ logger = setup_logger()
     "resource://indexed_sources",
     name="indexed_sources",
     description=(
-        "Enumerate the user's document sources that are currently indexed in Onyx."
+        "Enumerate the user's document sources that are currently indexed in LKnow."
         "This can be used to discover filters for the `search_indexed_documents` tool."
     ),
     mime_type="application/json",

@@ -33,25 +33,13 @@ class OnyxVersion:
 
 global_version = OnyxVersion()
 
-# Read LICENSE_ENFORCEMENT_ENABLED directly since it's in EE configs
-# This allows EE code to load when license enforcement is enabled,
-# even without ENABLE_PAID_ENTERPRISE_EDITION_FEATURES being set.
-# Eventually, ENABLE_PAID_ENTERPRISE_EDITION_FEATURES will be removed
-# and license enforcement will be the only mechanism for EE features.
-_LICENSE_ENFORCEMENT_ENABLED = (
-    os.environ.get("LICENSE_ENFORCEMENT_ENABLED", "true").lower() == "true"
-)
-
 
 def set_is_ee_based_on_env_variable() -> None:
     """Enable Enterprise Edition based on environment configuration.
 
-    EE is enabled if either:
-    - ENABLE_PAID_ENTERPRISE_EDITION_FEATURES=true (legacy/rollout flag)
-    - LICENSE_ENFORCEMENT_ENABLED=true (license-based gating)
-
-    When LICENSE_ENFORCEMENT_ENABLED is true, EE code is loaded but access
-    to EE-only features is controlled by the license enforcement middleware.
+    In the CE-only productized build, Enterprise Edition code is loaded only
+    when the explicit enterprise flag is enabled. License enforcement is not a
+    CE feature flag and must not pull the runtime into the `ee` package.
     """
     if global_version.is_ee_version():
         return
@@ -60,9 +48,6 @@ def set_is_ee_based_on_env_variable() -> None:
         logger.notice(
             "Enterprise Edition enabled via ENABLE_PAID_ENTERPRISE_EDITION_FEATURES"
         )
-        global_version.set_ee()
-    elif _LICENSE_ENFORCEMENT_ENABLED:
-        logger.notice("Enterprise Edition enabled via LICENSE_ENFORCEMENT_ENABLED")
         global_version.set_ee()
 
 

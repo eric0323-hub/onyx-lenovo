@@ -7,7 +7,7 @@ import { Button } from "@opal/components";
 import InlineExternalLink from "@/refresh-components/InlineExternalLink";
 import { logout } from "@/lib/user";
 import { loadStripe } from "@stripe/stripe-js";
-import { NEXT_PUBLIC_CLOUD_ENABLED } from "@/lib/constants";
+import { NEXT_PUBLIC_CLOUD_ENABLED, SUPPORT_EMAIL } from "@/lib/constants";
 import { useLicense } from "@/hooks/useLicense";
 import { useSettingsContext } from "@/providers/SettingsProvider";
 import { ApplicationStatus } from "@/interfaces/settings";
@@ -63,9 +63,9 @@ export default function AccessRestricted() {
     ? getSeatLimitMessage()
     : showRenewalMessage
       ? NEXT_PUBLIC_CLOUD_ENABLED
-        ? "Your access to Onyx has been temporarily suspended due to a lapse in your subscription."
-        : "Your access to Onyx has been temporarily suspended due to a lapse in your license."
-      : "An Enterprise license is required to use Onyx. Your data is protected and will be available once a license is activated.";
+        ? "Your access to LKnow has been temporarily suspended due to a lapse in your subscription."
+        : "Your access to LKnow has been temporarily suspended due to a lapse in your license."
+      : "An Enterprise license is required to use LKnow. Your data is protected and will be available once a license is activated.";
 
   const handleResubscribe = async () => {
     setIsLoading(true);
@@ -125,7 +125,7 @@ export default function AccessRestricted() {
       ) : NEXT_PUBLIC_CLOUD_ENABLED ? (
         <>
           <Text text03>
-            To reinstate your access and continue benefiting from Onyx&apos;s
+            To reinstate your access and continue benefiting from LKnow&apos;s
             powerful features, please update your payment information.
           </Text>
 
@@ -156,7 +156,7 @@ export default function AccessRestricted() {
         <>
           <Text text03>
             {hadPreviousLicense
-              ? "To reinstate your access and continue using Onyx, please contact your system administrator to renew your license."
+              ? "To reinstate your access and continue using LKnow, please contact your system administrator to renew your license."
               : "To get started, please contact your system administrator to obtain an Enterprise license."}
           </Text>
 
@@ -165,12 +165,18 @@ export default function AccessRestricted() {
             <Link className={linkClassName} href="/admin/billing">
               Admin Billing
             </Link>{" "}
-            page to {hadPreviousLicense ? "renew" : "activate"} your license,
-            sign up through Stripe or reach out to{" "}
-            <a className={linkClassName} href="mailto:support@onyx.app">
-              support@onyx.app
-            </a>{" "}
-            for billing assistance.
+            page to {hadPreviousLicense ? "renew" : "activate"} your license
+            {SUPPORT_EMAIL ? (
+              <>
+                , sign up through Stripe or reach out to{" "}
+                <a className={linkClassName} href={`mailto:${SUPPORT_EMAIL}`}>
+                  {SUPPORT_EMAIL}
+                </a>{" "}
+                for billing assistance.
+              </>
+            ) : (
+              "."
+            )}
           </Text>
 
           <div className="flex flex-row gap-2">

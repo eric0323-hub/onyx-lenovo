@@ -96,12 +96,9 @@ export default function ImpersonatePage() {
           )}
         </Formik>
 
-        <Text
-          as="p"
-          mainUiMuted
-          text03
-          className="mt-4 text-center px-4"
-        >{`Note: This feature is only available for @onyx.app administrators`}</Text>
+        <Text as="p" mainUiMuted text03 className="mt-4 text-center px-4">
+          Note: This feature is only available for LKnow administrators.
+        </Text>
       </div>
     </AuthFlowContainer>
   );

@@ -1,7 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { LOGOUT_DISABLED } from "@/lib/constants";
+import {
+  APP_MARKETING_URL,
+  DOCS_BASE_URL,
+  LOGOUT_DISABLED,
+} from "@/lib/constants";
 import { preload } from "swr";
 import { errorHandlingFetcher } from "@/lib/fetcher";
 import {
@@ -56,6 +60,10 @@ function SettingsPopover({
     user?.is_anonymous_user || checkUserIsNoAuthUser(user?.id ?? "");
   const showLogout = user && !isAnonymousUser && !LOGOUT_DISABLED;
   const showLogin = isAnonymousUser;
+  const versionLabel = `LKnow ${settings?.webVersion ?? "dev"}`;
+  const versionTitle = APP_MARKETING_URL
+    ? markdown(`[${versionLabel}](${APP_MARKETING_URL})`)
+    : versionLabel;
 
   const handleLogin = () => {
     const currentUrl = `${pathname}${
@@ -121,16 +129,18 @@ function SettingsPopover({
             ) : undefined
           }
         />,
-        <LineItemButton
-          key="help-faq"
-          sizePreset="main-ui"
-          variant="section"
-          rounding="sm"
-          icon={SvgHelpCircle}
-          title="Help & FAQ"
-          href="https://docs.onyx.app"
-          target="_blank"
-        />,
+        DOCS_BASE_URL && (
+          <LineItemButton
+            key="help-faq"
+            sizePreset="main-ui"
+            variant="section"
+            rounding="sm"
+            icon={SvgHelpCircle}
+            title="Help & FAQ"
+            href={DOCS_BASE_URL}
+            target="_blank"
+          />
+        ),
         settings?.enterpriseSettings?.custom_help_link_url && (
           <LineItemButton
             key="custom-help-link"
@@ -177,14 +187,10 @@ function SettingsPopover({
             color="muted"
             orientation="reverse"
             icon={SvgOnyxLogo}
-            title={markdown(
-              `[Onyx ${
-                settings?.webVersion ?? "dev"
-              }](https://docs.onyx.app/changelog)`
-            )}
+            title={versionTitle}
           />
         </div>,
-      ]}
+      ].filter(Boolean)}
     </PopoverMenu>
   );
 }

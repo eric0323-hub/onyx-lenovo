@@ -117,7 +117,7 @@ export default function UserSkillsPage() {
             {visibleItems.length > 0 && (
               <Text as="p" secondaryBody text03 className="pt-2">
                 Skills are managed by org admins. To request a new custom skill,
-                talk to your Onyx admin.
+                talk to your LKnow admin.
               </Text>
             )}
           </>

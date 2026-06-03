@@ -44,7 +44,7 @@ import InputTypeIn from "@/refresh-components/inputs/InputTypeIn";
 import InputSelect from "@/refresh-components/inputs/InputSelect";
 import { Disabled } from "@opal/core";
 import { ADMIN_ROUTES } from "@/lib/admin-routes";
-import { NEXT_PUBLIC_CLOUD_ENABLED } from "@/lib/constants";
+import { DOCS_BASE_URL, NEXT_PUBLIC_CLOUD_ENABLED } from "@/lib/constants";
 import {
   EmbeddingProviderName,
   SwitchoverType,
@@ -97,11 +97,11 @@ const route = ADMIN_ROUTES.INDEX_SETTINGS;
 
 const MODEL_TAB_CLOUD = "cloud-based";
 const MODEL_TAB_SELF = "self-hosted";
-const CLOUD_TOOLTIP = "This setting is managed by Onyx Cloud.";
+const CLOUD_TOOLTIP = "This setting is managed by LKnow Cloud.";
 
 /**
  * Wrapper that disables its children when either:
- * 1. The app is running on Onyx Cloud (`NEXT_PUBLIC_CLOUD_ENABLED`), or
+ * 1. The app is running on LKnow Cloud (`NEXT_PUBLIC_CLOUD_ENABLED`), or
  * 2. A local `disabled` condition is true (e.g. a parent toggle is off).
  */
 interface CloudDisabledProps {
@@ -820,7 +820,7 @@ export default function IndexSettingsPage() {
   } = useLlmDefaults();
 
   /**
-   * Persist a new default vision model. Onyx routes all image-captioning
+   * Persist a new default vision model. LKnow routes all image-captioning
    * calls through `get_default_llm_with_vision()` (`backend/onyx/llm/factory.py`),
    * which reads `default_vision` — so writing here switches the model the
    * indexer uses for new captions. Existing captions stay baked into the
@@ -1068,7 +1068,7 @@ export default function IndexSettingsPage() {
                         headerPadding="sm"
                         title="Changes require a full re-index."
                         description={markdown(
-                          "Modifying embedding or retrieval settings requires a full re-index of all documents to take effect, which may take **hours or days** depending on corpus size. [Learn More](https://docs.onyx.app/security/architecture/data_flows)"
+                          `Modifying embedding or retrieval settings requires a full re-index of all documents to take effect, which may take **hours or days** depending on corpus size. [Learn More](${DOCS_BASE_URL}/security/architecture/data_flows)`
                         )}
                         bottomChildren={
                           dirty ? (
@@ -1139,7 +1139,7 @@ export default function IndexSettingsPage() {
                   >
                     <Content
                       title="Embedding Model"
-                      description="Onyx uses this model to encode documents for search and retrieval."
+                      description="LKnow uses this model to encode documents for search and retrieval."
                       sizePreset="main-content"
                       variant="section"
                     />
@@ -1150,7 +1150,7 @@ export default function IndexSettingsPage() {
                           <GeneralLayouts.Section padding={0.5}>
                             <Content
                               icon={SvgVector}
-                              title="Embedding model and settings are managed by Onyx Cloud."
+                              title="Embedding model and settings are managed by LKnow Cloud."
                               sizePreset="main-ui"
                               variant="section"
                             />

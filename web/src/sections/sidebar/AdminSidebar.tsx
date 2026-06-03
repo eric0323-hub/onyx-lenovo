@@ -96,6 +96,11 @@ function buildItems(
     add(SECTIONS.ORGANIZATION, ADMIN_ROUTES.TOKEN_RATE_LIMITS);
   }
 
+  // 7. Usage and observability (admin only)
+  if (!isCurator) {
+    add(SECTIONS.USAGE, ADMIN_ROUTES.OBSERVABILITY);
+  }
+
   return items;
 }
 

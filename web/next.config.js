@@ -22,6 +22,9 @@ const nextConfig = {
   transpilePackages: ["@onyx-ai/opal"],
   typedRoutes: true,
   reactCompiler: true,
+  turbopack: {
+    root: __dirname,
+  },
   images: {
     // Used to fetch favicons
     remotePatterns: [

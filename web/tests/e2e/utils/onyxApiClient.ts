@@ -17,6 +17,24 @@ const E2E_IMAGE_GEN_API_KEY =
   process.env.OPENAI_API_KEY ||
   E2E_LLM_PROVIDER_API_KEY;
 
+const LLM_PROVIDER_SETUP_TIMEOUT_MS = 60000;
+
+interface E2ELlmModelConfiguration {
+  name: string;
+  is_visible?: boolean;
+}
+
+interface E2ELlmProvider {
+  id: number;
+  is_public?: boolean;
+  model_configurations?: E2ELlmModelConfiguration[];
+}
+
+interface E2EDefaultModel {
+  provider_id: number;
+  model_name: string;
+}
+
 /**
  * API Client for Onyx backend operations in E2E tests.
  *
@@ -466,24 +484,30 @@ export class OnyxApiClient {
    *
    * @returns Array of LLM providers with id and is_public fields
    */
-  async listLlmProviders(): Promise<
-    Array<{
-      id: number;
-      is_public?: boolean;
-    }>
-  > {
+  async listLlmProviders(): Promise<Array<E2ELlmProvider>> {
     const response = await this.get("/admin/llm/provider");
     const data = await this.handleResponse<{
-      providers: Array<{ id: number; is_public?: boolean }>;
+      providers: E2ELlmProvider[];
     }>(response, "Failed to list LLM providers");
     return data.providers;
+  }
+
+  async getLlmProviderConfiguration(): Promise<{
+    providers: E2ELlmProvider[];
+    default_text: E2EDefaultModel | null;
+  }> {
+    const response = await this.get("/admin/llm/provider");
+    return await this.handleResponse<{
+      providers: E2ELlmProvider[];
+      default_text: E2EDefaultModel | null;
+    }>(response, "Failed to list LLM providers");
   }
 
   /**
    * Ensure at least one public LLM provider exists and is set as default.
    *
-   * Idempotent — returns `null` if a public provider already exists,
-   * or the new provider ID if one was created.
+   * Idempotent — returns `null` if a default already exists or can be set on
+   * an existing public provider, or the new provider ID if one was created.
    *
    * @param providerName - Name for the provider (default: "PW Default Provider")
    * @returns The provider ID if one was created, or `null` if already present
@@ -491,10 +515,26 @@ export class OnyxApiClient {
   async ensurePublicProvider(
     providerName: string = "PW Default Provider"
   ): Promise<number | null> {
-    const providers = await this.listLlmProviders();
-    const hasPublic = providers.some((p) => p.is_public);
+    const { providers, default_text } =
+      await this.getLlmProviderConfiguration();
+    const publicProvider = providers.find((p) => p.is_public);
 
-    if (hasPublic) {
+    if (default_text) {
+      return null;
+    }
+
+    if (publicProvider) {
+      const defaultModelName = publicProvider.model_configurations?.find(
+        (modelConfiguration) => modelConfiguration.is_visible !== false
+      )?.name;
+
+      if (!defaultModelName) {
+        throw new Error(
+          `Public LLM provider ${publicProvider.id} has no visible models to set as default`
+        );
+      }
+
+      await this.setProviderAsDefault(publicProvider.id, defaultModelName);
       return null;
     }
 
@@ -511,6 +551,7 @@ export class OnyxApiClient {
           personas: [],
           model_configurations: [{ name: defaultModelName, is_visible: true }],
         },
+        timeout: LLM_PROVIDER_SETUP_TIMEOUT_MS,
       }
     );
 
@@ -538,10 +579,16 @@ export class OnyxApiClient {
     providerId: number,
     modelName: string
   ): Promise<void> {
-    const response = await this.post("/admin/llm/default", {
-      provider_id: providerId,
-      model_name: modelName,
-    });
+    const response = await this.request.post(
+      `${this.baseUrl}/admin/llm/default`,
+      {
+        data: {
+          provider_id: providerId,
+          model_name: modelName,
+        },
+        timeout: LLM_PROVIDER_SETUP_TIMEOUT_MS,
+      }
+    );
 
     await this.handleResponseSoft(
       response,

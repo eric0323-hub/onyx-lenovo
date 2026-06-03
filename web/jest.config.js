@@ -37,6 +37,7 @@ const sharedConfig = {
   },
 
   testPathIgnorePatterns: ["/node_modules/", "/tests/e2e/", "/.next/"],
+  modulePathIgnorePatterns: ["/.next/"],
 
   // Transform ES Modules in node_modules to CommonJS for Jest compatibility
   // Add packages here when you encounter: "SyntaxError: Unexpected token 'export'"

@@ -92,6 +92,13 @@ def get_sqlalchemy_async_engine() -> AsyncEngine:
     return _ASYNC_ENGINE
 
 
+async def reset_sqlalchemy_async_engine() -> None:
+    global _ASYNC_ENGINE
+    if _ASYNC_ENGINE is not None:
+        await _ASYNC_ENGINE.dispose()
+        _ASYNC_ENGINE = None
+
+
 async def get_async_session(
     tenant_id: str | None = None,
 ) -> AsyncGenerator[AsyncSession, None]:

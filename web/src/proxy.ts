@@ -28,7 +28,6 @@ export const config = {
 
     // Enterprise Edition routes (for /ee rewriting)
     // These are ONLY the EE-specific routes that should be rewritten
-    "/admin/groups/:path*",
     "/admin/performance/usage/:path*",
     "/admin/performance/query-history/:path*",
     "/admin/theme/:path*",
@@ -43,7 +42,6 @@ export const config = {
 
 // Enterprise Edition specific routes (ONLY these get /ee rewriting)
 const EE_ROUTES = [
-  "/admin/groups",
   "/admin/performance/usage",
   "/admin/performance/query-history",
   "/admin/theme",

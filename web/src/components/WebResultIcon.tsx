@@ -4,6 +4,22 @@ import { ValidSources } from "@/lib/types";
 import { SourceIcon } from "./SourceIcon";
 import { useState } from "react";
 import { SvgOnyxLogo, SvgGithub } from "@opal/logos";
+import { APP_MARKETING_URL } from "@/lib/constants";
+
+function getHostname(url: string) {
+  if (!url) return "";
+  try {
+    return new URL(url).hostname;
+  } catch {
+    try {
+      return new URL(`https://${url}`).hostname;
+    } catch {
+      return "";
+    }
+  }
+}
+
+const APP_MARKETING_HOSTNAME = getHostname(APP_MARKETING_URL);
 
 export function WebResultIcon({
   url,
@@ -13,19 +29,15 @@ export function WebResultIcon({
   size?: number;
 }) {
   const [error, setError] = useState(false);
-  let hostname;
-  try {
-    hostname = new URL(url).hostname;
-  } catch (e) {
-    hostname = "onyx.app";
-  }
+  const hostname = getHostname(url);
+
   return (
     <>
-      {hostname.includes("onyx.app") ? (
+      {APP_MARKETING_HOSTNAME && hostname.includes(APP_MARKETING_HOSTNAME) ? (
         <SvgOnyxLogo size={size} className="dark:text-white text-black" />
       ) : hostname === "github.com" || hostname.endsWith(".github.com") ? (
         <SvgGithub size={size} />
-      ) : !error ? (
+      ) : hostname && !error ? (
         <img
           className="my-0 rounded-full py-0"
           src={`https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${hostname}&size=128`}

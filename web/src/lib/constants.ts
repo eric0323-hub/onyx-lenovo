@@ -12,8 +12,23 @@ export const HOST_URL = process.env.WEB_DOMAIN || "http://localhost:3000";
 
 export const INTERNAL_URL = process.env.INTERNAL_URL || "http://localhost:8080";
 
-// Documentation URLs
-export const DOCS_BASE_URL = "https://docs.onyx.app";
+// Brand/support URLs. Configure these for custom deployments.
+export const APP_MARKETING_URL =
+  process.env.NEXT_PUBLIC_APP_MARKETING_URL ||
+  process.env.NEXT_PUBLIC_ONYX_MARKETING_URL ||
+  "";
+export const DOCS_BASE_URL =
+  process.env.NEXT_PUBLIC_DOCS_BASE_URL ||
+  process.env.NEXT_PUBLIC_ONYX_DOCS_URL ||
+  "https://docs.onyx.app";
+export const SUPPORT_EMAIL =
+  process.env.NEXT_PUBLIC_SUPPORT_EMAIL ||
+  process.env.NEXT_PUBLIC_ONYX_SUPPORT_EMAIL ||
+  "";
+export const SALES_URL =
+  process.env.NEXT_PUBLIC_SALES_URL ||
+  process.env.NEXT_PUBLIC_ONYX_SALES_URL ||
+  "";
 export const DOCS_ADMINS_PATH = `${DOCS_BASE_URL}/admins`;
 
 export const MCP_INTERNAL_URL =
@@ -136,6 +151,6 @@ export const DEFAULT_LOGO_SIZE_PX = 24;
 export const DEFAULT_CONTEXT_TOKENS = 120_000;
 export const MAX_CHUNKS_FED_TO_CHAT = 25;
 
-export const APP_SLOGAN = "Open Source AI Platform";
+export const APP_SLOGAN = "AI Knowledge Platform";
 
 export const DEFAULT_PAGE_SIZE = 10;

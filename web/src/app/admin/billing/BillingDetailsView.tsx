@@ -36,7 +36,7 @@ import {
 } from "@/lib/billing/svc";
 import { formatDateShort } from "@/lib/dateUtils";
 import { humanReadableFormatShort } from "@/lib/time";
-import { NEXT_PUBLIC_CLOUD_ENABLED } from "@/lib/constants";
+import { NEXT_PUBLIC_CLOUD_ENABLED, SUPPORT_EMAIL } from "@/lib/constants";
 import { useSettingsContext } from "@/providers/SettingsProvider";
 import { Tier } from "@/interfaces/settings";
 import useUsers from "@/hooks/useUsers";
@@ -288,14 +288,20 @@ function SubscriptionCard({
           {isManualLicenseOnly ? (
             <Text secondaryBody text03 className="text-right">
               Your plan is managed through sales.
-              <br />
-              <a
-                href="mailto:support@onyx.app?subject=Billing%20change%20request"
-                className="underline"
-              >
-                Contact billing
-              </a>{" "}
-              to make changes.
+              {SUPPORT_EMAIL ? (
+                <>
+                  <br />
+                  <a
+                    href={`mailto:${SUPPORT_EMAIL}?subject=Billing%20change%20request`}
+                    className="underline"
+                  >
+                    Contact billing
+                  </a>{" "}
+                  to make changes.
+                </>
+              ) : (
+                " Contact your administrator to make changes."
+              )}
             </Text>
           ) : disabled ? (
             <OpalButton

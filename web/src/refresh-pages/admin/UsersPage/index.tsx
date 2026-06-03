@@ -10,6 +10,7 @@ import { Tier } from "@/interfaces/settings";
 import useUserCounts from "@/hooks/useUserCounts";
 import { UserStatus } from "@/lib/types";
 import type { StatusFilter } from "./interfaces";
+import { DOCS_ADMINS_PATH } from "@/lib/constants";
 
 import UsersSummary from "./UsersSummary";
 import UsersTable from "./UsersTable";
@@ -81,13 +82,13 @@ export default function UsersPage() {
         <MessageCard
           variant="info"
           title="Upcoming changes to permissions"
-          description="Onyx is transitioning to group-based permissions for more granular access control. Curator and Global Curator roles will be replaced by configurable group permissions. We recommend reviewing current role assignments to ensure a smooth transition."
+          description="LKnow is transitioning to group-based permissions for more granular access control. Curator and Global Curator roles will be replaced by configurable group permissions. We recommend reviewing current role assignments to ensure a smooth transition."
           rightChildren={
             <Button
               icon={SvgExternalLink}
               onClick={() =>
                 window.open(
-                  "https://docs.onyx.app/admins/permissions/whats_changing",
+                  `${DOCS_ADMINS_PATH}/permissions/whats_changing`,
                   "_blank",
                   "noopener,noreferrer"
                 )

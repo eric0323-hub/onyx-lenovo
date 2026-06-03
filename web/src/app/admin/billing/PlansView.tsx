@@ -25,8 +25,7 @@ import Button from "@/refresh-components/buttons/Button";
 import { Button as OpalButton } from "@opal/components";
 import Text from "@/refresh-components/texts/Text";
 import { Section } from "@/layouts/general-layouts";
-
-const SALES_URL = "https://www.onyx.app/contact-sales";
+import { SALES_URL } from "@/lib/constants";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -261,9 +260,9 @@ export default function PlansView({
       title: "Enterprise",
       description:
         "Flexible pricing & deployment options\nfor large organizations",
-      buttonLabel: "Contact Sales",
+      buttonLabel: SALES_URL ? "Contact Sales" : "Contact your administrator",
       buttonVariant: "secondary",
-      href: SALES_URL,
+      href: SALES_URL || undefined,
       features: ENTERPRISE_FEATURES,
       featuresPrefix: "Everything in Business Plan, plus:",
       isCurrentPlan: !!hasLicense && !hasSubscription,

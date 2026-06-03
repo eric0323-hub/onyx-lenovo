@@ -1,5 +1,5 @@
 # Docker Compose Override for Development/Testing
-# This file exposes service ports for development and testing purposes
+# This file exposes service ports for development and testing purposes.
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait
@@ -11,25 +11,30 @@
 services:
   api_server:
     ports:
-      - "8080:8080"
+      - "${API_SERVER_HOST_PORT:-18082}:8080"
     deploy:
       resources:
         limits:
           cpus: "${API_SERVER_CPU_LIMIT:-0}"
           memory: "${API_SERVER_MEM_LIMIT:-0}"
 
-  # Uncomment the block below to enable the MCP server for Onyx.
+  # Uncomment the block below to enable the MCP server for LKnow.
   # mcp_server:
   #   ports:
-  #     - "8090:8090"
+  #     - "${MCP_SERVER_HOST_PORT:-18090}:8090"
+
+  nginx:
+    ports: !override
+      - "${HOST_PORT_80:-18081}:80"
+      - "${HOST_PORT:-18030}:80"
 
   relational_db:
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-15432}:5432"
 
   opensearch:
     ports:
-      - "9200:9200"
+      - "${OPENSEARCH_HOST_PORT:-19200}:9200"
     # Rootless Docker can reject the base OpenSearch ulimit settings, so clear
     # the inherited block entirely in the dev override.
     ulimits: !reset null
@@ -38,18 +43,24 @@ services:
 
   inference_model_server:
     ports:
-      - "9000:9000"
+      - "${MODEL_SERVER_HOST_PORT:-19000}:9000"
 
   cache:
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-16379}:6379"
+
+  web_server:
+    environment:
+      - HOSTNAME=0.0.0.0
 
   minio:
-    # use different ports to avoid conflicts with model servers
+    # Use different ports to avoid conflicts with model servers.
     ports:
-      - "9004:9000"
-      - "9005:9001"
+      - "${MINIO_API_HOST_PORT:-19004}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-19005}:9001"
 
   code-interpreter:
+    profiles:
+      - code-interpreter
     ports:
-      - "8000:8000"
+      - "${CODE_INTERPRETER_HOST_PORT:-18083}:8000"

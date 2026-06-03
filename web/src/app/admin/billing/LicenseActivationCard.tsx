@@ -11,8 +11,9 @@ import { SvgXCircle, SvgCheckCircle, SvgXOctagon } from "@opal/icons";
 import { uploadLicense } from "@/lib/billing/svc";
 import { LicenseStatus } from "@/lib/billing/interfaces";
 import { formatDateShort } from "@/lib/dateUtils";
+import { DOCS_BASE_URL } from "@/lib/constants";
 
-const BILLING_HELP_URL = "https://docs.onyx.app/admins/billing/overview";
+const BILLING_HELP_URL = `${DOCS_BASE_URL}/admins/billing/overview`;
 
 interface LicenseActivationCardProps {
   isOpen: boolean;
@@ -155,7 +156,7 @@ export default function LicenseActivationCard({
           </Button>
         </Section>
         <Text secondaryBody text03>
-          Manually add and activate a license for this Onyx instance.
+          Manually add and activate a license for this LKnow instance.
         </Text>
       </Section>
 
@@ -180,7 +181,7 @@ export default function LicenseActivationCard({
             subDescription={
               error
                 ? undefined
-                : "Paste or attach your license key file you received from Onyx."
+                : "Paste or attach your license key file you received from LKnow."
             }
             withLabel
           >

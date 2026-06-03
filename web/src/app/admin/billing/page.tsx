@@ -19,7 +19,7 @@ import {
   createCustomerPortalSession,
   StripePortalFlowType,
 } from "@/lib/billing";
-import { NEXT_PUBLIC_CLOUD_ENABLED } from "@/lib/constants";
+import { NEXT_PUBLIC_CLOUD_ENABLED, SUPPORT_EMAIL } from "@/lib/constants";
 import { SWR_KEYS } from "@/lib/swr-keys";
 import { useUser } from "@/providers/UserProvider";
 import { LinkButton, MessageCard } from "@opal/components";
@@ -49,8 +49,6 @@ interface ViewConfig {
 // FooterLinks (inlined)
 // ----------------------------------------------------------------------------
 
-const SUPPORT_EMAIL = "support@onyx.app";
-
 function FooterLinks({
   hasSubscription,
   onActivateLicense,
@@ -64,9 +62,11 @@ function FooterLinks({
   const licenseText = hasSubscription
     ? "Update License Key"
     : "Activate License Key";
-  const billingHelpHref = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
-    `[Billing] support for ${user?.email ?? "unknown"}`
-  )}`;
+  const billingHelpHref = SUPPORT_EMAIL
+    ? `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
+        `[Billing] support for ${user?.email ?? "unknown"}`
+      )}`
+    : "";
 
   return (
     <Section flexDirection="row" justifyContent="center" gap={1} height="auto">
@@ -78,7 +78,9 @@ function FooterLinks({
           <LinkButton onClick={onActivateLicense}>{licenseText}</LinkButton>
         </>
       )}
-      <LinkButton href={billingHelpHref}>Billing Help</LinkButton>
+      {billingHelpHref && (
+        <LinkButton href={billingHelpHref}>Billing Help</LinkButton>
+      )}
     </Section>
   );
 }

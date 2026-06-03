@@ -15,6 +15,7 @@ import GroupsList from "./GroupsList";
 import AdminListHeader from "@/sections/admin/AdminListHeader";
 import { IllustrationContent } from "@opal/layouts";
 import SvgNoResult from "@opal/illustrations/no-result";
+import { DOCS_ADMINS_PATH } from "@/lib/constants";
 
 function GroupsPage() {
   const router = useRouter();
@@ -33,13 +34,13 @@ function GroupsPage() {
           <MessageCard
             variant="info"
             title="Upcoming changes to permissions"
-            description="Onyx is transitioning to group-based permissions, enabling more flexible access control through configurable permissions per group. We recommend reviewing your group structure to prepare for this update."
+            description="LKnow is transitioning to group-based permissions, enabling more flexible access control through configurable permissions per group. We recommend reviewing your group structure to prepare for this update."
             rightChildren={
               <Button
                 icon={SvgExternalLink}
                 onClick={() =>
                   window.open(
-                    "https://docs.onyx.app/admins/permissions/whats_changing",
+                    `${DOCS_ADMINS_PATH}/permissions/whats_changing`,
                     "_blank",
                     "noopener,noreferrer"
                   )

@@ -6,27 +6,18 @@ import { useSettingsContext } from "@/providers/SettingsProvider";
 import SidebarSection from "@/sections/sidebar/SidebarSection";
 import * as SidebarLayouts from "@/layouts/sidebar-layouts";
 import { useSidebarFolded } from "@/layouts/sidebar-layouts";
-import { useCustomAnalyticsEnabled } from "@/lib/hooks/useCustomAnalyticsEnabled";
 import { useUser } from "@/providers/UserProvider";
 import { UserRole } from "@/lib/types";
-import { CombinedSettings, Tier } from "@/interfaces/settings";
-import { tierAtLeast } from "@/lib/tiers";
+import { CombinedSettings } from "@/interfaces/settings";
 import { Divider, SidebarTab } from "@opal/components";
 import InputTypeIn from "@/refresh-components/inputs/InputTypeIn";
 import Spacer from "@/refresh-components/Spacer";
-import { SvgArrowUpCircle, SvgSearch, SvgX } from "@opal/icons";
-import {
-  useBillingInformation,
-  useLicense,
-  hasActiveSubscription,
-} from "@/lib/billing";
+import { SvgSearch, SvgX } from "@opal/icons";
 import { ADMIN_ROUTES, sidebarItem } from "@/lib/admin-routes";
-import { NEXT_PUBLIC_CLOUD_ENABLED } from "@/lib/constants";
 import useFilter from "@/hooks/useFilter";
 import { IconFunctionComponent } from "@opal/types";
 import AccountPopover from "@/sections/sidebar/AccountPopover";
 import { useSidebarState } from "@/layouts/sidebar-layouts";
-import { markdown } from "@opal/utils";
 
 const SECTIONS = {
   UNLABELED: "",
@@ -44,37 +35,17 @@ interface SidebarItemEntry {
   icon: IconFunctionComponent;
   link: string;
   error?: boolean;
-  disabled?: boolean;
-  requiredTier?: Tier;
 }
 
 function buildItems(
   isCurator: boolean,
-  enableCloud: boolean,
-  tier: Tier | undefined,
-  settings: CombinedSettings | null,
-  customAnalyticsEnabled: boolean,
-  hasSubscription: boolean,
-  hooksEnabled: boolean
+  settings: CombinedSettings | null
 ): SidebarItemEntry[] {
   const vectorDbEnabled = settings?.settings.vector_db_enabled !== false;
   const items: SidebarItemEntry[] = [];
 
   const add = (section: string, route: Parameters<typeof sidebarItem>[0]) => {
     items.push({ ...sidebarItem(route), section });
-  };
-
-  const addGated = (
-    section: string,
-    route: Parameters<typeof sidebarItem>[0],
-    requiredTier: Tier
-  ) => {
-    items.push({
-      ...sidebarItem(route),
-      section,
-      disabled: !tierAtLeast(tier, requiredTier),
-      requiredTier,
-    });
   };
 
   // 1. No header — core configuration (admin only)
@@ -85,14 +56,6 @@ function buildItems(
     add(SECTIONS.UNLABELED, ADMIN_ROUTES.VOICE);
     add(SECTIONS.UNLABELED, ADMIN_ROUTES.CODE_INTERPRETER);
     add(SECTIONS.UNLABELED, ADMIN_ROUTES.CHAT_PREFERENCES);
-
-    if (!enableCloud && customAnalyticsEnabled) {
-      addGated(
-        SECTIONS.UNLABELED,
-        ADMIN_ROUTES.CUSTOM_ANALYTICS,
-        Tier.ENTERPRISE
-      );
-    }
   }
 
   // 2. Agents & Actions
@@ -117,57 +80,20 @@ function buildItems(
 
   // 4. Integrations (admin only)
   if (!isCurator) {
-    addGated(SECTIONS.INTEGRATIONS, ADMIN_ROUTES.API_KEYS, Tier.BUSINESS);
+    add(SECTIONS.INTEGRATIONS, ADMIN_ROUTES.API_KEYS);
     add(SECTIONS.INTEGRATIONS, ADMIN_ROUTES.SLACK_BOTS);
     add(SECTIONS.INTEGRATIONS, ADMIN_ROUTES.DISCORD_BOTS);
-    if (hooksEnabled) {
-      addGated(SECTIONS.INTEGRATIONS, ADMIN_ROUTES.HOOKS, Tier.ENTERPRISE);
-    }
   }
 
   // 5. Permissions
   if (!isCurator) {
     add(SECTIONS.PERMISSIONS, ADMIN_ROUTES.USERS);
-    addGated(SECTIONS.PERMISSIONS, ADMIN_ROUTES.GROUPS, Tier.BUSINESS);
-    addGated(SECTIONS.PERMISSIONS, ADMIN_ROUTES.SCIM, Tier.ENTERPRISE);
-  } else if (tierAtLeast(tier, Tier.BUSINESS)) {
     add(SECTIONS.PERMISSIONS, ADMIN_ROUTES.GROUPS);
   }
 
   // 6. Organization (admin only)
   if (!isCurator) {
-    if (hasSubscription) {
-      add(SECTIONS.ORGANIZATION, ADMIN_ROUTES.BILLING);
-    }
-    addGated(
-      SECTIONS.ORGANIZATION,
-      ADMIN_ROUTES.TOKEN_RATE_LIMITS,
-      Tier.ENTERPRISE
-    );
-    addGated(SECTIONS.ORGANIZATION, ADMIN_ROUTES.THEME, Tier.BUSINESS);
-  }
-
-  // 7. Usage (admin only)
-  if (!isCurator) {
-    addGated(SECTIONS.USAGE, ADMIN_ROUTES.USAGE, Tier.BUSINESS);
-    if (settings?.settings.query_history_type !== "disabled") {
-      addGated(SECTIONS.USAGE, ADMIN_ROUTES.QUERY_HISTORY, Tier.BUSINESS);
-    }
-  }
-
-  // 8. Upgrade Plan (admin only, no subscription)
-  if (!isCurator && !hasSubscription) {
-    items.push({
-      section: SECTIONS.UNLABELED,
-      name: "Upgrade Plan",
-      icon: SvgArrowUpCircle,
-      link: ADMIN_ROUTES.BILLING.path,
-    });
-  }
-
-  // 7. Usage and observability (admin only)
-  if (!isCurator) {
-    add(SECTIONS.USAGE, ADMIN_ROUTES.OBSERVABILITY);
+    add(SECTIONS.ORGANIZATION, ADMIN_ROUTES.TOKEN_RATE_LIMITS);
   }
 
   return items;
@@ -200,46 +126,18 @@ function AdminSidebarInner() {
     }
   }, [focusSearch, folded]);
   const pathname = usePathname();
-  const { customAnalyticsEnabled } = useCustomAnalyticsEnabled();
   const { user } = useUser();
   const settings = useSettingsContext();
-  const tier = settings?.settings.tier;
-  const { data: billingData, isLoading: billingLoading } =
-    useBillingInformation();
-  const { data: licenseData, isLoading: licenseLoading } = useLicense();
   const isCurator =
     user?.role === UserRole.CURATOR || user?.role === UserRole.GLOBAL_CURATOR;
-  // Default to true while loading to avoid flashing "Upgrade Plan"
-  const hasSubscriptionOrLicense =
-    billingLoading || licenseLoading
-      ? true
-      : Boolean(
-          (billingData && hasActiveSubscription(billingData)) ||
-          licenseData?.has_license
-        );
-  // Hooks are ENTERPRISE-only and only available for self-hosted single-tenant.
-  const hooksEnabled =
-    tierAtLeast(tier, Tier.ENTERPRISE) &&
-    (settings?.settings.hooks_enabled ?? false);
 
-  const allItems = buildItems(
-    isCurator,
-    NEXT_PUBLIC_CLOUD_ENABLED,
-    tier,
-    settings,
-    customAnalyticsEnabled,
-    hasSubscriptionOrLicense,
-    hooksEnabled
-  );
+  const allItems = buildItems(isCurator, settings);
 
   const itemExtractor = useCallback((item: SidebarItemEntry) => item.name, []);
 
   const { query, setQuery, filtered } = useFilter(allItems, itemExtractor);
 
-  const enabled = filtered.filter((item) => !item.disabled);
-  const disabled = filtered.filter((item) => item.disabled);
-  const enabledGroups = groupBySection(enabled);
-  const disabledGroups = groupBySection(disabled);
+  const enabledGroups = groupBySection(filtered);
 
   return (
     <>
@@ -290,31 +188,6 @@ function AdminSidebarInner() {
             </SidebarSection>
           );
         })}
-
-        {disabledGroups.length > 0 && <Divider paddingPerpendicular="fit" />}
-
-        {disabledGroups.map((group, groupIndex) => (
-          <SidebarSection
-            key={`disabled-${groupIndex}`}
-            title={group.section}
-            disabled
-          >
-            {group.items.map(({ link, icon, name, requiredTier }) => (
-              <SidebarTab
-                key={link}
-                disabled
-                icon={icon}
-                tooltip={markdown(
-                  requiredTier === Tier.ENTERPRISE
-                    ? "This feature is available on the [Enterprise version of Onyx](/admin/billing) only."
-                    : "This feature is available on the [Business or Enterprise version of Onyx](/admin/billing) only."
-                )}
-              >
-                {name}
-              </SidebarTab>
-            ))}
-          </SidebarSection>
-        ))}
       </SidebarLayouts.Body>
 
       <SidebarLayouts.Footer>

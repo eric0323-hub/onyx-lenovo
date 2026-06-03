@@ -28,7 +28,7 @@ export const insertUserTokenRateLimit = async (
   });
 };
 
-// User Group Token Limits (EE Only)
+// User Group Token Limits
 export const insertGroupTokenRateLimit = async (
   tokenRateLimit: TokenRateLimitArgs,
   group_id: number

@@ -2,7 +2,8 @@
 
 import useSWR from "swr";
 import { Button, Card, MessageCard, Text } from "@opal/components";
-import { Content, ContentAction, SettingsLayouts } from "@opal/layouts";
+import * as SettingsLayouts from "@/layouts/settings-layouts";
+import { Content, ContentAction } from "@opal/layouts";
 import {
   SvgCheckCircle,
   SvgExternalLink,

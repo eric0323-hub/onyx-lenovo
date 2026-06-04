@@ -1,6 +1,6 @@
 # Frontend Feature Visibility
 
-MVP 发布时，前端功能隐藏由 Next.js env 变量控制：`NEXT_PUBLIC_FEATURE_VISIBILITY_OVERRIDES`。
+MVP 发布时，前端功能隐藏由 Next.js env 变量控制：`NEXT_PUBLIC_FEATURE_VISIBILITY_OVERRIDES`。为避免多处配置冲突，这个变量统一放在 `web/.env.local` 管理，不再放到 docker compose 的 `.env`、`env.template` 或 compose build args 里。
 
 这个变量是一个 JSON object，用来覆盖 [web/src/lib/featureVisibility.ts](/Users/yangsong/Documents/Lenovo/code/onyx-lenovo/web/src/lib/featureVisibility.ts) 里的默认配置。默认配置是：`enabled: false`，所有功能入口都展示，行为等同上游 Onyx。
 
@@ -8,7 +8,7 @@ MVP 发布时，前端功能隐藏由 Next.js env 变量控制：`NEXT_PUBLIC_FE
 
 ## Env 用法
 
-在 `deployment/docker_compose/.env` 中配置：
+在 `web/.env.local` 中配置：
 
 ```env
 NEXT_PUBLIC_FEATURE_VISIBILITY_OVERRIDES={"enabled":true,"hiddenFeatureFallback":"app","searchMode":false,"chatHistory":false,"chatSharing":false,"agents":false,"projects":false,"adminPanel":false}

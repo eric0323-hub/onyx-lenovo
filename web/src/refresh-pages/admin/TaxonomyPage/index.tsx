@@ -1976,14 +1976,20 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
   );
 }
 
-function ArticleTagList({ tags }: { tags: DocumentTaxonomyTag[] }) {
+function ArticleTagList({
+  tags,
+  maxVisible = 2,
+}: {
+  tags: DocumentTaxonomyTag[];
+  maxVisible?: number;
+}) {
   const activeTags = tags.filter((tag) => tag.status === "active");
 
   if (!activeTags.length) {
     return <Tag title="暂无标签" color="gray" />;
   }
 
-  const visibleTags = activeTags.slice(0, 2);
+  const visibleTags = activeTags.slice(0, maxVisible);
   const hiddenCount = activeTags.length - visibleTags.length;
 
   return (
@@ -2012,16 +2018,14 @@ function getSummaryStatusColor(status: DocumentTaxonomySummary["status"]) {
 
 function ArticleProcessingSummary({
   summary,
-  tags,
 }: {
   summary: DocumentTaxonomySummary;
-  tags: DocumentTaxonomyTag[];
 }) {
   const stage = getArticleStage(summary);
 
   return (
-    <div className="grid grid-cols-[minmax(0,2fr)_minmax(140px,1fr)_150px] items-center gap-3 border-t border-border-01 pt-1.5">
-      <div className="col-span-2 grid grid-cols-[minmax(170px,auto)_minmax(140px,1fr)_2.75rem] items-center gap-3">
+    <div className="border-t border-border-01 pt-1.5">
+      <div className="grid w-fit max-w-full grid-cols-[minmax(170px,auto)_minmax(220px,360px)_2.75rem] items-center gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Tag title={stage.title} color={stage.color} />
           <Text as="p" font="secondary-body" color="text-03" maxLines={1}>
@@ -2040,13 +2044,6 @@ function ArticleProcessingSummary({
         <Text font="main-ui-action" color="text-05" nowrap>
           {`${stage.progress}%`}
         </Text>
-      </div>
-
-      <div className="flex min-w-0 items-center justify-end gap-2">
-        <Text as="span" font="figure-small-label" color="text-03" nowrap>
-          标签
-        </Text>
-        <ArticleTagList tags={tags} />
       </div>
     </div>
   );
@@ -2117,6 +2114,14 @@ function ArticleTimeCell({ summary }: { summary: DocumentTaxonomySummary }) {
       <Text as="p" font="secondary-body" color="text-03" maxLines={1}>
         {formatDate(summary.generated_at || summary.updated_at)}
       </Text>
+    </div>
+  );
+}
+
+function ArticleTagsCell({ tags }: { tags: DocumentTaxonomyTag[] }) {
+  return (
+    <div className="flex min-w-0 justify-center">
+      <ArticleTagList tags={tags} maxVisible={1} />
     </div>
   );
 }
@@ -2272,13 +2277,14 @@ function ImportedArticleRow({
 
   return (
     <div className="flex flex-col gap-1.5 border-b border-border-01 px-4 py-2.5 last:border-b-0">
-      <div className="grid grid-cols-[minmax(0,2fr)_minmax(140px,1fr)_150px] items-center gap-3">
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(140px,0.75fr)_150px_minmax(180px,220px)] items-center gap-3">
         <ArticleFileNameCell summary={summary} />
         <ArticleTimeCell summary={summary} />
         <ArticleSummaryStatus summary={summary} onEditSummary={onEditSummary} />
+        <ArticleTagsCell tags={tags} />
       </div>
 
-      <ArticleProcessingSummary summary={summary} tags={tags} />
+      <ArticleProcessingSummary summary={summary} />
     </div>
   );
 }
@@ -2344,7 +2350,7 @@ function ImportedArticlesList({
           <div className="border-b border-border-01 px-4 py-4">
             <ArticleListHeader count={summaries.length} />
           </div>
-          <div className="grid grid-cols-[minmax(0,2fr)_minmax(140px,1fr)_150px] items-center gap-3 border-b border-border-01 bg-background-tint-01 px-4 py-2.5">
+          <div className="grid grid-cols-[minmax(0,2fr)_minmax(140px,0.75fr)_150px_minmax(180px,220px)] items-center gap-3 border-b border-border-01 bg-background-tint-01 px-4 py-2.5">
             <Text font="figure-small-label" color="text-03">
               文件名
             </Text>
@@ -2354,6 +2360,11 @@ function ImportedArticlesList({
             <Text font="figure-small-label" color="text-03">
               Summary
             </Text>
+            <div className="flex justify-center">
+              <Text font="figure-small-label" color="text-03">
+                标签
+              </Text>
+            </div>
           </div>
           {summaries.map((summary) => (
             <ImportedArticleRow

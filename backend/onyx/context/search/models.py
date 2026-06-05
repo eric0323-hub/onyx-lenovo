@@ -66,6 +66,7 @@ class BaseFilters(BaseModel):
     document_set: list[str] | None = None
     time_cutoff: datetime | None = None
     tags: list[Tag] | None = None
+    taxonomy_node_ids: list[str] | None = None
 
 
 class UserFileFilters(BaseModel):
@@ -98,6 +99,7 @@ class IndexFilters(BaseFilters, UserFileFilters, AssistantKnowledgeFilters):
     # DocumentAccess::to_acl.
     access_control_list: list[str] | None
     tenant_id: str | None = None
+    taxonomy_leaf_ids: list[str] | None = None
 
 
 class BasicChunkRequest(BaseModel):

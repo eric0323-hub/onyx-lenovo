@@ -92,6 +92,20 @@ from onyx.db.enums import SwitchoverType
 from onyx.db.enums import SyncStatus
 from onyx.db.enums import SyncType
 from onyx.db.enums import TaskStatus
+from onyx.db.enums import TaxonomyAssignmentStatus
+from onyx.db.enums import TaxonomyCandidateStatus
+from onyx.db.enums import TaxonomyChangeType
+from onyx.db.enums import TaxonomyNodeLevel
+from onyx.db.enums import TaxonomyNodeSource
+from onyx.db.enums import TaxonomyNodeStatus
+from onyx.db.enums import TaxonomyReviewStatus
+from onyx.db.enums import TaxonomyScope
+from onyx.db.enums import TaxonomySummaryStatus
+from onyx.db.enums import TaxonomyTaggingSource
+from onyx.db.enums import TaxonomyTaggingTaskStatus
+from onyx.db.enums import TaxonomyTagSource
+from onyx.db.enums import TaxonomyVersionSource
+from onyx.db.enums import TaxonomyVersionStatus
 from onyx.db.enums import ThemePreference
 from onyx.db.enums import UserFileStatus
 from onyx.db.index_attempt_metrics_models import IndexAttemptStage
@@ -1043,6 +1057,16 @@ class Document(Base):
         secondary=Document__Tag.__table__,
         back_populates="documents",
     )
+    taxonomy_summary: Mapped["DocumentTaxonomySummary | None"] = relationship(
+        "DocumentTaxonomySummary",
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )
+    taxonomy_tags: Mapped[list["DocumentTaxonomyTag"]] = relationship(
+        "DocumentTaxonomyTag",
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )
 
     # Relationship to parent hierarchy node (the folder/space containing this doc)
     parent_hierarchy_node: Mapped["HierarchyNode | None"] = relationship(
@@ -1073,6 +1097,475 @@ class Document(Base):
             postgresql_where=text("last_modified > last_synced OR last_synced IS NULL"),
         ),
     )
+
+
+class Taxonomy(Base):
+    __tablename__ = "taxonomy"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    scope: Mapped[TaxonomyScope] = mapped_column(
+        Enum(TaxonomyScope, native_enum=False),
+        nullable=False,
+        default=TaxonomyScope.ENTERPRISE,
+        server_default=TaxonomyScope.ENTERPRISE.value,
+    )
+    active_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "taxonomy_version.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_taxonomy_active_version_id",
+        ),
+        nullable=True,
+    )
+    default_language: Mapped[str | None] = mapped_column(String, nullable=True)
+    industry_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    company_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner_user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    active_version: Mapped["TaxonomyVersion | None"] = relationship(
+        "TaxonomyVersion", foreign_keys=[active_version_id], post_update=True
+    )
+    versions: Mapped[list["TaxonomyVersion"]] = relationship(
+        "TaxonomyVersion",
+        back_populates="taxonomy",
+        foreign_keys="TaxonomyVersion.taxonomy_id",
+        cascade="all, delete-orphan",
+    )
+
+
+class TaxonomyVersion(Base):
+    __tablename__ = "taxonomy_version"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    taxonomy_id: Mapped[int] = mapped_column(
+        ForeignKey("taxonomy.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[TaxonomyVersionStatus] = mapped_column(
+        Enum(TaxonomyVersionStatus, native_enum=False),
+        nullable=False,
+        default=TaxonomyVersionStatus.DRAFT,
+        server_default=TaxonomyVersionStatus.DRAFT.value,
+        index=True,
+    )
+    parent_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("taxonomy_version.id", ondelete="SET NULL"), nullable=True
+    )
+    source: Mapped[TaxonomyVersionSource] = mapped_column(
+        Enum(TaxonomyVersionSource, native_enum=False),
+        nullable=False,
+        default=TaxonomyVersionSource.MANUAL,
+        server_default=TaxonomyVersionSource.MANUAL.value,
+    )
+    change_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    effective_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    confirmed_by_user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    health_summary: Mapped[dict[str, Any] | None] = mapped_column(
+        postgresql.JSONB(), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    taxonomy: Mapped["Taxonomy"] = relationship(
+        "Taxonomy", back_populates="versions", foreign_keys=[taxonomy_id]
+    )
+    parent_version: Mapped["TaxonomyVersion | None"] = relationship(
+        "TaxonomyVersion", remote_side=[id]
+    )
+    nodes: Mapped[list["TaxonomyNode"]] = relationship(
+        "TaxonomyNode", back_populates="version", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "taxonomy_id", "version_number", name="uq_taxonomy_version_number"
+        ),
+    )
+
+
+class TaxonomyNode(Base):
+    __tablename__ = "taxonomy_node"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    version_id: Mapped[int] = mapped_column(
+        ForeignKey("taxonomy_version.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("taxonomy_node.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    level: Mapped[TaxonomyNodeLevel] = mapped_column(
+        Enum(TaxonomyNodeLevel, native_enum=False), nullable=False, index=True
+    )
+    code: Mapped[str | None] = mapped_column(String, nullable=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    full_path: Mapped[str] = mapped_column(Text, nullable=False)
+    path_node_ids: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String), nullable=False, default=list
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    definition: Mapped[str] = mapped_column(Text, nullable=False)
+    applicability: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    exclusion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    positive_examples: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String), nullable=False, default=list
+    )
+    negative_examples: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String), nullable=False, default=list
+    )
+    keywords: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String), nullable=False, default=list
+    )
+    synonyms: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String), nullable=False, default=list
+    )
+    tagging_guidance: Mapped[str | None] = mapped_column(Text, nullable=True)
+    conflict_rules: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[TaxonomyNodeSource] = mapped_column(
+        Enum(TaxonomyNodeSource, native_enum=False),
+        nullable=False,
+        default=TaxonomyNodeSource.MANUAL,
+        server_default=TaxonomyNodeSource.MANUAL.value,
+    )
+    source_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[TaxonomyNodeStatus] = mapped_column(
+        Enum(TaxonomyNodeStatus, native_enum=False),
+        nullable=False,
+        default=TaxonomyNodeStatus.DRAFT,
+        server_default=TaxonomyNodeStatus.DRAFT.value,
+        index=True,
+    )
+    replacement_node_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_by_user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    version: Mapped["TaxonomyVersion"] = relationship(
+        "TaxonomyVersion", back_populates="nodes"
+    )
+    parent: Mapped["TaxonomyNode | None"] = relationship(
+        "TaxonomyNode", remote_side=[id], back_populates="children"
+    )
+    children: Mapped[list["TaxonomyNode"]] = relationship(
+        "TaxonomyNode", back_populates="parent", cascade="all, delete-orphan"
+    )
+    document_tags: Mapped[list["DocumentTaxonomyTag"]] = relationship(
+        "DocumentTaxonomyTag", back_populates="leaf_node"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("version_id", "code", name="uq_taxonomy_node_version_code"),
+        Index("ix_taxonomy_node_version_parent", "version_id", "parent_id"),
+        Index("ix_taxonomy_node_version_level_status", "version_id", "level", "status"),
+    )
+
+
+class DocumentTaxonomySummary(Base):
+    __tablename__ = "document_taxonomy_summary"
+
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("document.id", ondelete="CASCADE"), primary_key=True
+    )
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[TaxonomySummaryStatus] = mapped_column(
+        Enum(TaxonomySummaryStatus, native_enum=False),
+        nullable=False,
+        default=TaxonomySummaryStatus.PENDING,
+        server_default=TaxonomySummaryStatus.PENDING.value,
+        index=True,
+    )
+    is_manual: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_info: Mapped[dict[str, Any] | None] = mapped_column(
+        postgresql.JSONB(), nullable=True
+    )
+    generated_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    document: Mapped["Document"] = relationship(
+        "Document", back_populates="taxonomy_summary"
+    )
+
+
+class TaxonomyTaggingTask(Base):
+    __tablename__ = "taxonomy_tagging_task"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    version_id: Mapped[int] = mapped_column(
+        ForeignKey("taxonomy_version.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[TaxonomyTaggingTaskStatus] = mapped_column(
+        Enum(TaxonomyTaggingTaskStatus, native_enum=False),
+        nullable=False,
+        default=TaxonomyTaggingTaskStatus.PENDING,
+        server_default=TaxonomyTaggingTaskStatus.PENDING.value,
+        index=True,
+    )
+    source: Mapped[TaxonomyTaggingSource] = mapped_column(
+        Enum(TaxonomyTaggingSource, native_enum=False),
+        nullable=False,
+        default=TaxonomyTaggingSource.SUMMARY,
+        server_default=TaxonomyTaggingSource.SUMMARY.value,
+    )
+    enable_optimization: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    optimization_strength: Mapped[str | None] = mapped_column(String, nullable=True)
+    total_docs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processed_docs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_docs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    started_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    version: Mapped["TaxonomyVersion | None"] = relationship("TaxonomyVersion")
+    tags: Mapped[list["DocumentTaxonomyTag"]] = relationship(
+        "DocumentTaxonomyTag", back_populates="task"
+    )
+    candidates: Mapped[list["TaxonomyCandidateLabel"]] = relationship(
+        "TaxonomyCandidateLabel", back_populates="task", cascade="all, delete-orphan"
+    )
+
+
+class DocumentTaxonomyTag(Base):
+    __tablename__ = "document_taxonomy_tag"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("document.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    leaf_node_id: Mapped[str] = mapped_column(
+        ForeignKey("taxonomy_node.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    version_id: Mapped[int] = mapped_column(
+        ForeignKey("taxonomy_version.id", ondelete="SET NULL"), nullable=True
+    )
+    task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("taxonomy_tagging_task.id", ondelete="SET NULL"), nullable=True
+    )
+    full_path_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[TaxonomyTagSource] = mapped_column(
+        Enum(TaxonomyTagSource, native_enum=False),
+        nullable=False,
+        default=TaxonomyTagSource.AI_RECOMMENDED,
+        server_default=TaxonomyTagSource.AI_RECOMMENDED.value,
+    )
+    is_primary: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unmatched_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tagging_source_content: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    model_info: Mapped[dict[str, Any] | None] = mapped_column(
+        postgresql.JSONB(), nullable=True
+    )
+    review_status: Mapped[TaxonomyReviewStatus] = mapped_column(
+        Enum(TaxonomyReviewStatus, native_enum=False),
+        nullable=False,
+        default=TaxonomyReviewStatus.UNCONFIRMED,
+        server_default=TaxonomyReviewStatus.UNCONFIRMED.value,
+    )
+    reviewed_by_user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[TaxonomyAssignmentStatus] = mapped_column(
+        Enum(TaxonomyAssignmentStatus, native_enum=False),
+        nullable=False,
+        default=TaxonomyAssignmentStatus.ACTIVE,
+        server_default=TaxonomyAssignmentStatus.ACTIVE.value,
+        index=True,
+    )
+    invalidation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    document: Mapped["Document"] = relationship(
+        "Document", back_populates="taxonomy_tags"
+    )
+    leaf_node: Mapped["TaxonomyNode | None"] = relationship(
+        "TaxonomyNode", back_populates="document_tags"
+    )
+    version: Mapped["TaxonomyVersion | None"] = relationship("TaxonomyVersion")
+    task: Mapped["TaxonomyTaggingTask | None"] = relationship(
+        "TaxonomyTaggingTask", back_populates="tags"
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_document_taxonomy_tag_doc_status",
+            "document_id",
+            "status",
+        ),
+        Index(
+            "ix_document_taxonomy_tag_leaf_status",
+            "leaf_node_id",
+            "status",
+        ),
+    )
+
+
+class TaxonomyCandidateLabel(Base):
+    __tablename__ = "taxonomy_candidate_label"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("taxonomy_tagging_task.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("document.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    candidate_path: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String), nullable=False
+    )
+    definition: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[TaxonomyCandidateStatus] = mapped_column(
+        Enum(TaxonomyCandidateStatus, native_enum=False),
+        nullable=False,
+        default=TaxonomyCandidateStatus.PENDING_REVIEW,
+        server_default=TaxonomyCandidateStatus.PENDING_REVIEW.value,
+        index=True,
+    )
+    redundancy_result: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    suggested_reuse_node_id: Mapped[str | None] = mapped_column(
+        ForeignKey("taxonomy_node.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    task: Mapped["TaxonomyTaggingTask"] = relationship(
+        "TaxonomyTaggingTask", back_populates="candidates"
+    )
+    document: Mapped["Document"] = relationship("Document")
+    suggested_reuse_node: Mapped["TaxonomyNode | None"] = relationship("TaxonomyNode")
+
+
+class TaxonomyChangeRecord(Base):
+    __tablename__ = "taxonomy_change_record"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("taxonomy_version.id", ondelete="SET NULL"), nullable=True
+    )
+    node_id: Mapped[str | None] = mapped_column(
+        ForeignKey("taxonomy_node.id", ondelete="SET NULL"), nullable=True
+    )
+    change_type: Mapped[TaxonomyChangeType] = mapped_column(
+        Enum(TaxonomyChangeType, native_enum=False), nullable=False, index=True
+    )
+    before_snapshot: Mapped[dict[str, Any] | None] = mapped_column(
+        postgresql.JSONB(), nullable=True
+    )
+    after_snapshot: Mapped[dict[str, Any] | None] = mapped_column(
+        postgresql.JSONB(), nullable=True
+    )
+    semantic_impact: Mapped[str | None] = mapped_column(String, nullable=True)
+    affected_document_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    affected_leaf_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    suggested_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    confirmed_by_user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    version: Mapped["TaxonomyVersion | None"] = relationship("TaxonomyVersion")
+    node: Mapped["TaxonomyNode | None"] = relationship("TaxonomyNode")
 
 
 class OpenSearchDocumentMigrationRecord(Base):

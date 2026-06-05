@@ -229,6 +229,7 @@ export interface BaseFilters {
   document_set?: string[] | null;
   time_cutoff?: string | null; // ISO date string
   tags?: Array<{ tag_key: string; tag_value: string }> | null;
+  taxonomy_node_ids?: string[] | null;
 }
 
 /**

@@ -83,6 +83,111 @@
   border: 1px solid green;
 }
 
+@layer components {
+  .taxonomy-tree .rc-tree {
+    width: 100%;
+    color: var(--text-05);
+  }
+
+  .taxonomy-tree .rc-tree-list-holder-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .taxonomy-tree .rc-tree-treenode {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+    min-width: 0;
+    border-radius: var(--border-radius-08);
+  }
+
+  .taxonomy-tree .rc-tree-treenode:hover {
+    background: var(--background-tint-01);
+  }
+
+  .taxonomy-tree .rc-tree-indent {
+    display: inline-flex;
+    flex: none;
+    align-items: stretch;
+  }
+
+  .taxonomy-tree .rc-tree-indent-unit {
+    width: 1rem;
+    border-left: 1px solid var(--border-01);
+  }
+
+  .taxonomy-tree .rc-tree-switcher,
+  .taxonomy-tree .rc-tree-checkbox {
+    flex: none;
+    margin-top: 0.625rem;
+  }
+
+  .taxonomy-tree .rc-tree-switcher {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    color: var(--text-03);
+    cursor: pointer;
+  }
+
+  .taxonomy-tree .rc-tree-switcher-noop {
+    cursor: default;
+  }
+
+  .taxonomy-tree .rc-tree-checkbox {
+    position: relative;
+    display: inline-flex;
+    width: 1rem;
+    height: 1rem;
+    margin-right: 0.5rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-03);
+    border-radius: var(--border-radius-04);
+    background: var(--background-tint-00);
+    cursor: pointer;
+  }
+
+  .taxonomy-tree .rc-tree-checkbox-checked {
+    border-color: var(--action-link-05);
+    background: var(--action-link-05);
+  }
+
+  .taxonomy-tree .rc-tree-checkbox-checked::after {
+    width: 0.375rem;
+    height: 0.625rem;
+    margin-top: -0.125rem;
+    border-right: 2px solid var(--text-inverted-05);
+    border-bottom: 2px solid var(--text-inverted-05);
+    transform: rotate(45deg);
+    content: "";
+  }
+
+  .taxonomy-tree .rc-tree-checkbox-indeterminate::after {
+    width: 0.5rem;
+    height: 2px;
+    border-radius: var(--border-radius-full);
+    background: var(--action-link-05);
+    content: "";
+  }
+
+  .taxonomy-tree .rc-tree-node-content-wrapper {
+    flex: 1;
+    min-width: 0;
+    border-radius: var(--border-radius-08);
+    cursor: default;
+  }
+
+  .taxonomy-tree .rc-tree-title {
+    display: block;
+    min-width: 0;
+  }
+}
+
 @layer base {
   @font-face {
     font-family: "KH Teka";

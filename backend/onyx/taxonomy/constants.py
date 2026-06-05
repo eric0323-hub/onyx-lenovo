@@ -1,0 +1,9 @@
+TAXONOMY_METADATA_VERSION_KEY = "taxonomy_version"
+TAXONOMY_METADATA_L1_KEY = "taxonomy_l1_id"
+TAXONOMY_METADATA_L2_KEY = "taxonomy_l2_id"
+TAXONOMY_METADATA_LEAF_KEY = "taxonomy_leaf_id"
+TAXONOMY_METADATA_PATH_KEY = "taxonomy_path"
+
+DEFAULT_TAXONOMY_NAME = "Enterprise Knowledge Taxonomy"
+TAXONOMY_PROMPT_VERSION = "taxonomy_mvp_v1"
+DEFAULT_TAXONOMY_MAX_LEAF_NODES = 18

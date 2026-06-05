@@ -24,6 +24,7 @@ const SECTIONS = {
   UNLABELED: "",
   AGENTS_AND_ACTIONS: "Agents & Actions",
   DOCUMENTS_AND_KNOWLEDGE: "Documents & Knowledge",
+  LABEL_AND_TAXONOMY: "标签治理",
   INTEGRATIONS: "Integrations",
   PERMISSIONS: "Permissions",
   ORGANIZATION: "Organization",
@@ -84,25 +85,29 @@ function buildItems(
     }
   }
 
-  // 4. Integrations (admin only)
+  // 4. Label & Taxonomy
+  add(SECTIONS.LABEL_AND_TAXONOMY, ADMIN_ROUTES.TAXONOMY);
+  add(SECTIONS.LABEL_AND_TAXONOMY, ADMIN_ROUTES.TAXONOMY_IMPORTS);
+
+  // 5. Integrations (admin only)
   if (!isCurator) {
     add(SECTIONS.INTEGRATIONS, ADMIN_ROUTES.API_KEYS);
     add(SECTIONS.INTEGRATIONS, ADMIN_ROUTES.SLACK_BOTS);
     add(SECTIONS.INTEGRATIONS, ADMIN_ROUTES.DISCORD_BOTS);
   }
 
-  // 5. Permissions
+  // 6. Permissions
   if (!isCurator) {
     add(SECTIONS.PERMISSIONS, ADMIN_ROUTES.USERS);
     add(SECTIONS.PERMISSIONS, ADMIN_ROUTES.GROUPS);
   }
 
-  // 6. Organization (admin only)
+  // 7. Organization (admin only)
   if (!isCurator) {
     add(SECTIONS.ORGANIZATION, ADMIN_ROUTES.TOKEN_RATE_LIMITS);
   }
 
-  // 7. Usage and observability (admin only)
+  // 8. Usage and observability (admin only)
   if (!isCurator) {
     add(SECTIONS.USAGE, ADMIN_ROUTES.OBSERVABILITY);
   }
@@ -122,6 +127,26 @@ function groupBySection(items: SidebarItemEntry[]) {
     }
   }
   return groups;
+}
+
+function isPathSelected(pathname: string, link: string): boolean {
+  return pathname === link || pathname.startsWith(`${link}/`);
+}
+
+function getSelectedSidebarLink(
+  pathname: string,
+  items: SidebarItemEntry[]
+): string | undefined {
+  if (
+    pathname.startsWith("/admin/taxonomy/") &&
+    !isPathSelected(pathname, ADMIN_ROUTES.TAXONOMY_IMPORTS.path)
+  ) {
+    return ADMIN_ROUTES.TAXONOMY.path;
+  }
+
+  return items
+    .filter((item) => isPathSelected(pathname, item.link))
+    .sort((a, b) => b.link.length - a.link.length)[0]?.link;
 }
 
 function AdminSidebarInner() {
@@ -149,6 +174,7 @@ function AdminSidebarInner() {
   const { query, setQuery, filtered } = useFilter(allItems, itemExtractor);
 
   const enabledGroups = groupBySection(filtered);
+  const selectedLink = getSelectedSidebarLink(pathname, allItems);
 
   return (
     <>
@@ -183,7 +209,7 @@ function AdminSidebarInner() {
               key={link}
               icon={icon}
               href={link}
-              selected={pathname.startsWith(link)}
+              selected={selectedLink === link}
             >
               {name}
             </SidebarTab>

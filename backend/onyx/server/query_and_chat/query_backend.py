@@ -16,12 +16,17 @@ from onyx.db.enums import Permission
 from onyx.db.models import User
 from onyx.db.search_settings import get_current_search_settings
 from onyx.db.tag import find_tags
+from onyx.db.taxonomy import get_node_descendant_leaf_ids
 from onyx.document_index.factory import get_default_document_index
 from onyx.server.query_and_chat.models import AdminSearchRequest
 from onyx.server.query_and_chat.models import AdminSearchResponse
 from onyx.server.query_and_chat.models import SourceTag
 from onyx.server.query_and_chat.models import TagResponse
+from onyx.server.settings.store import load_settings
 from onyx.server.utils_vector_db import require_vector_db
+from onyx.taxonomy.models import TaxonomySearchApplyTo
+from onyx.taxonomy.models import TaxonomySearchRecommendedAction
+from onyx.taxonomy.search_matcher import match_taxonomy_query
 from onyx.utils.logger import setup_logger
 from shared_configs.contextvars import get_current_tenant_id
 
@@ -42,12 +47,33 @@ def admin_search(
     query = question.query
     logger.notice("Received admin search query: %s", query)
     user_acl_filters = build_access_filters_for_user(user, db_session)
+    taxonomy_leaf_ids: list[str] | None = None
+    if question.filters.taxonomy_node_ids:
+        taxonomy_leaf_ids = get_node_descendant_leaf_ids(
+            db_session,
+            node_ids=question.filters.taxonomy_node_ids,
+            active_only=True,
+        )
+    elif query:
+        decision = match_taxonomy_query(
+            query=query,
+            settings=load_settings(),
+            apply_to=TaxonomySearchApplyTo.SEARCH,
+            db_session=db_session,
+        )
+        if decision.recommended_action in (
+            TaxonomySearchRecommendedAction.SOFT_FILTER,
+            TaxonomySearchRecommendedAction.HARD_FILTER,
+        ):
+            taxonomy_leaf_ids = decision.expanded_leaf_ids
 
     final_filters = IndexFilters(
         source_type=question.filters.source_type,
         document_set=question.filters.document_set,
         time_cutoff=question.filters.time_cutoff,
         tags=question.filters.tags,
+        taxonomy_node_ids=question.filters.taxonomy_node_ids,
+        taxonomy_leaf_ids=taxonomy_leaf_ids,
         access_control_list=user_acl_filters,
         tenant_id=tenant_id,
     )

@@ -133,6 +133,7 @@ export type FeatureVisibilityConfig = {
   adminDocumentSets: boolean;
   adminDocumentExplorer: boolean;
   adminDocumentFeedback: boolean;
+  adminTaxonomy: boolean;
   adminIndexSettings: boolean;
   adminServiceAccounts: boolean;
   adminSlackBots: boolean;
@@ -213,6 +214,7 @@ export const defaultFeatureVisibilityConfig: FeatureVisibilityConfig = {
   adminDocumentSets: true,
   adminDocumentExplorer: true,
   adminDocumentFeedback: true,
+  adminTaxonomy: true,
   adminIndexSettings: true,
   adminServiceAccounts: true,
   adminSlackBots: true,
@@ -356,6 +358,12 @@ const adminRouteFeatureEntries: [string, FeatureVisibilityKey][] = [
   ["/admin/documents/sets", "adminDocumentSets"],
   ["/admin/documents/explorer", "adminDocumentExplorer"],
   ["/admin/documents/feedback", "adminDocumentFeedback"],
+  ["/admin/taxonomy", "adminTaxonomy"],
+  ["/admin/taxonomy/template-draft", "adminTaxonomy"],
+  ["/admin/taxonomy/imports", "adminTaxonomy"],
+  ["/admin/taxonomy/summaries", "adminTaxonomy"],
+  ["/admin/taxonomy/batch-tagging", "adminTaxonomy"],
+  ["/admin/taxonomy/query-match", "adminTaxonomy"],
   ["/admin/configuration/index-settings", "adminIndexSettings"],
   ["/admin/service-accounts", "adminServiceAccounts"],
   ["/admin/bots", "adminSlackBots"],

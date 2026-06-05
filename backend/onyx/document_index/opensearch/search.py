@@ -49,6 +49,7 @@ from onyx.document_index.opensearch.schema import TENANT_ID_FIELD_NAME
 from onyx.document_index.opensearch.schema import TITLE_FIELD_NAME
 from onyx.document_index.opensearch.schema import TITLE_VECTOR_FIELD_NAME
 from onyx.document_index.opensearch.schema import USER_PROJECTS_FIELD_NAME
+from onyx.taxonomy.constants import TAXONOMY_METADATA_LEAF_KEY
 
 # See https://docs.opensearch.org/latest/query-dsl/term/terms/.
 MAX_NUM_TERMS_ALLOWED_IN_TERMS_QUERY = 65_536
@@ -227,6 +228,7 @@ class DocumentQuery:
             access_control_list=index_filters.access_control_list,
             source_types=index_filters.source_type or [],
             tags=index_filters.tags or [],
+            taxonomy_leaf_ids=index_filters.taxonomy_leaf_ids or [],
             document_sets=index_filters.document_set or [],
             project_id_filter=index_filters.project_id_filter,
             persona_id_filter=index_filters.persona_id_filter,
@@ -293,6 +295,7 @@ class DocumentQuery:
             access_control_list=None,
             source_types=[],
             tags=[],
+            taxonomy_leaf_ids=[],
             document_sets=[],
             project_id_filter=None,
             persona_id_filter=None,
@@ -365,6 +368,7 @@ class DocumentQuery:
             access_control_list=index_filters.access_control_list,
             source_types=index_filters.source_type or [],
             tags=index_filters.tags or [],
+            taxonomy_leaf_ids=index_filters.taxonomy_leaf_ids or [],
             document_sets=index_filters.document_set or [],
             project_id_filter=index_filters.project_id_filter,
             persona_id_filter=index_filters.persona_id_filter,
@@ -460,6 +464,7 @@ class DocumentQuery:
             access_control_list=index_filters.access_control_list,
             source_types=index_filters.source_type or [],
             tags=index_filters.tags or [],
+            taxonomy_leaf_ids=index_filters.taxonomy_leaf_ids or [],
             document_sets=index_filters.document_set or [],
             project_id_filter=index_filters.project_id_filter,
             persona_id_filter=index_filters.persona_id_filter,
@@ -542,6 +547,7 @@ class DocumentQuery:
             access_control_list=index_filters.access_control_list,
             source_types=index_filters.source_type or [],
             tags=index_filters.tags or [],
+            taxonomy_leaf_ids=index_filters.taxonomy_leaf_ids or [],
             document_sets=index_filters.document_set or [],
             project_id_filter=index_filters.project_id_filter,
             persona_id_filter=index_filters.persona_id_filter,
@@ -603,6 +609,7 @@ class DocumentQuery:
             access_control_list=index_filters.access_control_list,
             source_types=index_filters.source_type or [],
             tags=index_filters.tags or [],
+            taxonomy_leaf_ids=index_filters.taxonomy_leaf_ids or [],
             document_sets=index_filters.document_set or [],
             project_id_filter=index_filters.project_id_filter,
             persona_id_filter=index_filters.persona_id_filter,
@@ -842,6 +849,7 @@ class DocumentQuery:
         access_control_list: list[str] | None,
         source_types: list[DocumentSource],
         tags: list[Tag],
+        taxonomy_leaf_ids: list[str],
         document_sets: list[str],
         project_id_filter: int | None,
         persona_id_filter: int | None,
@@ -1043,6 +1051,27 @@ class DocumentQuery:
             # individual term clauses.
             return {"terms": {METADATA_LIST_FIELD_NAME: tag_str_list}}
 
+        def _get_taxonomy_leaf_filter(leaf_ids: list[str]) -> TermsQuery[str]:
+            """Returns an isolated taxonomy leaf metadata filter.
+
+            Taxonomy leaves share the OpenSearch metadata field with regular
+            tags, but stay as a separate bool/filter clause so regular metadata
+            tag OR semantics cannot accidentally widen taxonomy filtering.
+            """
+            if not leaf_ids:
+                raise ValueError(
+                    "leaf_ids cannot be empty if trying to create a taxonomy filter."
+                )
+            if len(leaf_ids) > MAX_NUM_TERMS_ALLOWED_IN_TERMS_QUERY:
+                raise ValueError(
+                    f"Too many taxonomy leaf IDs: {len(leaf_ids)}. Max allowed: {MAX_NUM_TERMS_ALLOWED_IN_TERMS_QUERY}."
+                )
+            tag_str_list = [
+                f"{TAXONOMY_METADATA_LEAF_KEY}{INDEX_SEPARATOR}{leaf_id}"
+                for leaf_id in leaf_ids
+            ]
+            return {"terms": {METADATA_LIST_FIELD_NAME: tag_str_list}}
+
         def _get_document_set_filter(document_sets: list[str]) -> TermsQuery[str]:
             """Returns a filter for the document sets.
 
@@ -1218,6 +1247,9 @@ class DocumentQuery:
             # documents where at least one tag provided here is present in the
             # document's metadata list.
             filter_clauses.append(_get_tag_filter(tags))
+
+        if taxonomy_leaf_ids:
+            filter_clauses.append(_get_taxonomy_leaf_filter(taxonomy_leaf_ids))
 
         # Knowledge scope: explicit knowledge attachments restrict what an
         # assistant can see. When none are set the assistant searches

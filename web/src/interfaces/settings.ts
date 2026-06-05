@@ -19,6 +19,20 @@ export enum QueryHistoryType {
   NORMAL = "normal",
 }
 
+export enum TaxonomySearchMode {
+  OFF = "off",
+  MANUAL_ONLY = "manual_only",
+  SUGGEST_ONLY = "suggest_only",
+  SOFT_FILTER_WITH_FALLBACK = "soft_filter_with_fallback",
+  HARD_FILTER = "hard_filter",
+}
+
+export enum TaxonomySearchApplyTo {
+  CHAT = "chat",
+  SEARCH = "search",
+  BOTH = "both",
+}
+
 export interface Settings {
   anonymous_user_enabled: boolean;
   invite_only_enabled: boolean;
@@ -67,6 +81,24 @@ export interface Settings {
 
   // OpenSearch migration
   opensearch_indexing_enabled?: boolean;
+
+  // Taxonomy Search settings
+  taxonomy_search_enabled?: boolean;
+  taxonomy_search_mode?: TaxonomySearchMode;
+  taxonomy_search_apply_to?: TaxonomySearchApplyTo;
+  taxonomy_search_default_confidence_threshold?: number;
+  taxonomy_search_leaf_confidence_threshold?: number | null;
+  taxonomy_search_l2_confidence_threshold?: number | null;
+  taxonomy_search_l1_confidence_threshold?: number | null;
+  taxonomy_search_enable_hierarchy_fallback?: boolean;
+  taxonomy_search_allow_l2_hard_filter?: boolean;
+  taxonomy_search_allow_l1_hard_filter?: boolean;
+  taxonomy_search_min_results_for_filtered_search?: number;
+  taxonomy_search_max_leaf_expansion_count?: number;
+  taxonomy_search_timeout_ms?: number;
+  taxonomy_search_require_coverage_percent?: number | null;
+  taxonomy_search_require_version_confirmed?: boolean;
+  taxonomy_search_exclude_low_confidence_assignments?: boolean;
 
   // Vector DB availability flag - false when DISABLE_VECTOR_DB is set.
   // When false, connectors, RAG search, document sets, and related features

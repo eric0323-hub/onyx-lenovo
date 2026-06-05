@@ -98,6 +98,105 @@ class ProcessingMode(str, PyEnum):
     RAW_BINARY = "RAW_BINARY"  # Write raw binary to S3 (no text extraction)
 
 
+class TaxonomyScope(str, PyEnum):
+    ENTERPRISE = "enterprise"
+
+
+class TaxonomyVersionStatus(str, PyEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    SUPERSEDED = "superseded"
+    DEPRECATED = "deprecated"
+
+
+class TaxonomyVersionSource(str, PyEnum):
+    DEFAULT_TEMPLATE = "default_template"
+    AI_GENERATED = "ai_generated"
+    MANUAL = "manual"
+    TAGGING_OPTIMIZATION = "tagging_optimization"
+
+
+class TaxonomyNodeLevel(str, PyEnum):
+    L1 = "l1"
+    L2 = "l2"
+    LEAF = "leaf"
+
+
+class TaxonomyNodeSource(str, PyEnum):
+    SYSTEM_DEFAULT = "system_default"
+    INDUSTRY_TEMPLATE = "industry_template"
+    AI_GENERATED = "ai_generated"
+    MANUAL = "manual"
+    TASK_GENERATED = "task_generated"
+
+
+class TaxonomyNodeStatus(str, PyEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    MODIFIED = "modified"
+    DISABLED = "disabled"
+    DELETED = "deleted"
+
+
+class TaxonomySummaryStatus(str, PyEnum):
+    PENDING = "pending"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class TaxonomyTagSource(str, PyEnum):
+    AI_RECOMMENDED = "ai_recommended"
+    TASK_GENERATED = "task_generated"
+    ADMIN_CONFIRMED = "admin_confirmed"
+    RETAGGED = "retagged"
+    MANUAL = "manual"
+
+
+class TaxonomyAssignmentStatus(str, PyEnum):
+    ACTIVE = "active"
+    STALE = "stale"
+    NEEDS_REVIEW = "needs_review"
+    NEEDS_RETAG = "needs_retag"
+    DEPENDS_ON_DISABLED_LABEL = "depends_on_disabled_label"
+
+
+class TaxonomyReviewStatus(str, PyEnum):
+    UNCONFIRMED = "unconfirmed"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    MODIFIED = "modified"
+
+
+class TaxonomyTaggingTaskStatus(str, PyEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    COMPLETED_WITH_ERRORS = "completed_with_errors"
+
+
+class TaxonomyTaggingSource(str, PyEnum):
+    SUMMARY = "summary"
+    ORIGINAL = "original"
+
+
+class TaxonomyCandidateStatus(str, PyEnum):
+    PENDING_REVIEW = "pending_review"
+    REUSED_EXISTING = "reused_existing"
+    TASK_ADDED = "task_added"
+    REJECTED = "rejected"
+    NEEDS_HANDLING = "needs_handling"
+
+
+class TaxonomyChangeType(str, PyEnum):
+    CREATE = "create"
+    UPDATE = "update"
+    MOVE = "move"
+    DISABLE = "disable"
+    DELETE = "delete"
+    ACTIVATE_VERSION = "activate_version"
+
+
 class SyncType(str, PyEnum):
     DOCUMENT_SET = "document_set"
     USER_GROUP = "user_group"

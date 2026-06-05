@@ -1,4 +1,5 @@
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -17,6 +18,7 @@ from onyx.context.search.retrieval.search_runner import search_chunks
 from onyx.context.search.utils import inference_section_from_chunks
 from onyx.db.document_set import filter_document_set_names_by_user_access
 from onyx.db.models import User
+from onyx.db.taxonomy import get_node_descendant_leaf_ids
 from onyx.document_index.interfaces_new import DocumentIndex
 from onyx.error_handling.error_codes import OnyxErrorCode
 from onyx.error_handling.exceptions import OnyxError
@@ -26,6 +28,11 @@ from onyx.natural_language_processing.english_stopwords import strip_stopwords
 from onyx.natural_language_processing.search_nlp_models import EmbeddingModel
 from onyx.secondary_llm_flows.source_filter import extract_source_filter
 from onyx.secondary_llm_flows.time_filter import extract_time_filter
+from onyx.server.settings.store import load_settings
+from onyx.taxonomy.models import TaxonomySearchApplyTo
+from onyx.taxonomy.models import TaxonomySearchDecision
+from onyx.taxonomy.models import TaxonomySearchRecommendedAction
+from onyx.taxonomy.search_matcher import match_taxonomy_query
 from onyx.utils.logger import setup_logger
 from onyx.utils.threadpool_concurrency import FunctionCall
 from onyx.utils.threadpool_concurrency import run_functions_in_parallel
@@ -35,6 +42,13 @@ from shared_configs.configs import MULTI_TENANT
 from shared_configs.contextvars import get_current_tenant_id
 
 logger = setup_logger()
+
+
+@dataclass(frozen=True)
+class _IndexFilterBuildResult:
+    filters: IndexFilters
+    taxonomy_decision: TaxonomySearchDecision | None = None
+    taxonomy_filter_is_manual: bool = False
 
 
 @log_function_time(print_only=True)
@@ -55,7 +69,8 @@ def _build_index_filters(
     hierarchy_node_ids: list[int] | None = None,
     # Pre-fetched ACL filters (skips DB query when provided)
     acl_filters: list[str] | None = None,
-) -> IndexFilters:
+    taxonomy_apply_to: TaxonomySearchApplyTo = TaxonomySearchApplyTo.CHAT,
+) -> _IndexFilterBuildResult:
     if auto_detect_filters and (llm is None or query is None):
         raise RuntimeError("LLM and query are required for auto detect filters")
 
@@ -131,6 +146,30 @@ def _build_index_filters(
             raise ValueError("Either db_session or acl_filters must be provided")
         user_acl_filters = build_access_filters_for_user(user, db_session)
 
+    taxonomy_leaf_ids: list[str] | None = None
+    taxonomy_decision: TaxonomySearchDecision | None = None
+    taxonomy_filter_is_manual = False
+    if db_session is not None:
+        if base_filters.taxonomy_node_ids:
+            taxonomy_leaf_ids = get_node_descendant_leaf_ids(
+                db_session,
+                node_ids=base_filters.taxonomy_node_ids,
+                active_only=True,
+            )
+            taxonomy_filter_is_manual = True
+        elif query:
+            taxonomy_decision = match_taxonomy_query(
+                query=query,
+                settings=load_settings(),
+                apply_to=taxonomy_apply_to,
+                db_session=db_session,
+            )
+            if taxonomy_decision.recommended_action in (
+                TaxonomySearchRecommendedAction.SOFT_FILTER,
+                TaxonomySearchRecommendedAction.HARD_FILTER,
+            ):
+                taxonomy_leaf_ids = taxonomy_decision.expanded_leaf_ids
+
     final_filters = IndexFilters(
         project_id_filter=project_id_filter,
         persona_id_filter=persona_id_filter,
@@ -138,6 +177,8 @@ def _build_index_filters(
         document_set=document_set_filter,
         time_cutoff=time_filter,
         tags=base_filters.tags,
+        taxonomy_node_ids=base_filters.taxonomy_node_ids,
+        taxonomy_leaf_ids=taxonomy_leaf_ids or None,
         access_control_list=user_acl_filters,
         tenant_id=get_current_tenant_id() if MULTI_TENANT else None,
         # Assistant knowledge filters
@@ -145,7 +186,11 @@ def _build_index_filters(
         hierarchy_node_ids=hierarchy_node_ids,
     )
 
-    return final_filters
+    return _IndexFilterBuildResult(
+        filters=final_filters,
+        taxonomy_decision=taxonomy_decision,
+        taxonomy_filter_is_manual=taxonomy_filter_is_manual,
+    )
 
 
 def merge_individual_chunks(
@@ -288,6 +333,7 @@ def search_pipeline(
     acl_filters: list[str] | None = None,
     embedding_model: EmbeddingModel | None = None,
     prefetched_federated_retrieval_infos: list[FederatedRetrievalInfo] | None = None,
+    taxonomy_apply_to: TaxonomySearchApplyTo = TaxonomySearchApplyTo.CHAT,
 ) -> list[InferenceChunk]:
     persona_document_sets: list[str] | None = (
         persona_search_info.document_set_names if persona_search_info else None
@@ -304,7 +350,7 @@ def search_pipeline(
         persona_search_info.hierarchy_node_ids or None if persona_search_info else None
     )
 
-    filters = _build_index_filters(
+    filter_build_result = _build_index_filters(
         user_provided_filters=chunk_search_request.user_selected_filters,
         user=user,
         project_id_filter=project_id_filter,
@@ -319,27 +365,60 @@ def search_pipeline(
         attached_document_ids=attached_document_ids,
         hierarchy_node_ids=hierarchy_node_ids,
         acl_filters=acl_filters,
+        taxonomy_apply_to=taxonomy_apply_to,
     )
+    filters = filter_build_result.filters
 
     query_keywords = strip_stopwords(chunk_search_request.query)
 
-    query_request = ChunkIndexRequest(
-        query=chunk_search_request.query,
-        hybrid_alpha=chunk_search_request.hybrid_alpha,
-        recency_bias_multiplier=chunk_search_request.recency_bias_multiplier,
-        query_keywords=query_keywords,
-        filters=filters,
-        limit=chunk_search_request.limit,
-    )
+    def build_query_request(index_filters: IndexFilters) -> ChunkIndexRequest:
+        return ChunkIndexRequest(
+            query=chunk_search_request.query,
+            hybrid_alpha=chunk_search_request.hybrid_alpha,
+            recency_bias_multiplier=chunk_search_request.recency_bias_multiplier,
+            query_keywords=query_keywords,
+            filters=index_filters,
+            limit=chunk_search_request.limit,
+        )
 
-    retrieved_chunks = search_chunks(
-        query_request=query_request,
-        user_id=user.id if user else None,
-        document_index=document_index,
-        db_session=db_session,
-        embedding_model=embedding_model,
-        prefetched_federated_retrieval_infos=prefetched_federated_retrieval_infos,
-    )
+    query_request = build_query_request(filters)
+
+    def run_search(request: ChunkIndexRequest) -> list[InferenceChunk]:
+        return search_chunks(
+            query_request=request,
+            user_id=user.id if user else None,
+            document_index=document_index,
+            db_session=db_session,
+            embedding_model=embedding_model,
+            prefetched_federated_retrieval_infos=prefetched_federated_retrieval_infos,
+        )
+
+    retrieved_chunks = run_search(query_request)
+
+    taxonomy_decision = filter_build_result.taxonomy_decision
+    if (
+        taxonomy_decision is not None
+        and taxonomy_decision.recommended_action
+        == TaxonomySearchRecommendedAction.SOFT_FILTER
+        and filters.taxonomy_leaf_ids
+        and not filter_build_result.taxonomy_filter_is_manual
+    ):
+        taxonomy_config = load_settings()
+        if (
+            len(retrieved_chunks)
+            < taxonomy_config.taxonomy_search_min_results_for_filtered_search
+        ):
+            relaxed_filters = filters.model_copy(
+                update={"taxonomy_leaf_ids": None, "taxonomy_node_ids": None}
+            )
+            logger.info(
+                "Relaxing taxonomy soft filter for query after %s results; "
+                "matched node=%s confidence=%s",
+                len(retrieved_chunks),
+                taxonomy_decision.node_id,
+                taxonomy_decision.confidence,
+            )
+            retrieved_chunks = run_search(build_query_request(relaxed_filters))
 
     # For some specific connectors like Salesforce, a user that has access to an object doesn't mean
     # that they have access to all of the fields of the object.

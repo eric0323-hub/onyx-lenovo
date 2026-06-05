@@ -40,6 +40,7 @@ from onyx.db.document import upsert_documents
 from onyx.db.engine.sql_engine import get_session_with_current_tenant
 from onyx.db.enums import AccessType
 from onyx.db.enums import HookPoint
+from onyx.db.enums import TaxonomySummaryStatus
 from onyx.db.hierarchy import link_hierarchy_nodes_to_documents
 from onyx.db.index_attempt_metrics import IndexAttemptStage
 from onyx.db.index_attempt_metrics import safe_record_single_event_if_set
@@ -48,6 +49,7 @@ from onyx.db.models import Document as DBDocument
 from onyx.db.models import IndexModelStatus
 from onyx.db.search_settings import get_active_search_settings
 from onyx.db.tag import upsert_document_tags
+from onyx.db.taxonomy import upsert_document_summary
 from onyx.document_index.document_index_utils import get_multipass_config
 from onyx.document_index.document_metadata import DocumentMetadata
 from onyx.document_index.interfaces_new import DocumentIndex
@@ -87,6 +89,7 @@ from onyx.natural_language_processing.utils import tokenizer_trim_middle
 from onyx.prompts.contextual_retrieval import CONTEXTUAL_RAG_PROMPT1
 from onyx.prompts.contextual_retrieval import CONTEXTUAL_RAG_PROMPT2
 from onyx.prompts.contextual_retrieval import DOCUMENT_SUMMARY_PROMPT
+from onyx.taxonomy.service import run_summary_tagging_if_possible
 from onyx.tracing.flows import LLMFlow
 from onyx.tracing.llm_utils import llm_generation_span
 from onyx.tracing.llm_utils import record_llm_response
@@ -1346,6 +1349,7 @@ def index_doc_batch(
         # Acquires a lock on the documents so that no other process can modify
         # them.  Not needed until here, since this is when the actual race
         # condition with vector db can occur.
+        summarized_document_ids: list[str] = []
         with adapter.lock_context(context.updatable_docs) as db_session:
             enricher = adapter.prepare_enrichment(
                 context=context,
@@ -1434,6 +1438,32 @@ def index_doc_batch(
                 successfully_indexed_ids = {
                     r.document_id for r in primary_doc_idx_insertion_records
                 }
+                doc_summary_by_id: dict[str, str] = {}
+                for chunk in embedded_chunks:
+                    if (
+                        chunk.doc_summary
+                        and chunk.source_document.id not in doc_summary_by_id
+                    ):
+                        doc_summary_by_id[chunk.source_document.id] = chunk.doc_summary
+                for doc_id, doc_summary in doc_summary_by_id.items():
+                    if doc_id not in successfully_indexed_ids:
+                        continue
+                    upsert_document_summary(
+                        db_session,
+                        document_id=doc_id,
+                        summary=doc_summary,
+                        status=TaxonomySummaryStatus.COMPLETE,
+                        is_manual=False,
+                        model_info=(
+                            {
+                                "model_provider": llm.config.model_provider,
+                                "model_name": llm.config.model_name,
+                            }
+                            if llm is not None
+                            else None
+                        ),
+                    )
+                    summarized_document_ids.append(doc_id)
                 update_docs_content_hash__no_commit(
                     ids_to_new_hash={
                         doc_id: context.doc_id_to_content_hash[doc_id]
@@ -1441,6 +1471,14 @@ def index_doc_batch(
                         if doc_id in context.doc_id_to_content_hash
                     },
                     db_session=db_session,
+                )
+
+        if summarized_document_ids:
+            with get_session_with_current_tenant() as db_session:
+                run_summary_tagging_if_possible(
+                    db_session=db_session,
+                    document_ids=summarized_document_ids,
+                    created_by_user_id=None,
                 )
 
     assert primary_doc_idx_insertion_records is not None

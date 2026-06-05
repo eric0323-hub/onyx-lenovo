@@ -17,6 +17,7 @@ from onyx.document_index.vespa_constants import SOURCE_TYPE
 from onyx.document_index.vespa_constants import TENANT_ID
 from onyx.document_index.vespa_constants import USER_PROJECT
 from onyx.kg.utils.formatting_utils import split_relationship_id
+from onyx.taxonomy.constants import TAXONOMY_METADATA_LEAF_KEY
 from onyx.utils.logger import setup_logger
 from shared_configs.configs import MULTI_TENANT
 
@@ -198,6 +199,14 @@ def build_vespa_filters(
             f"{tag.tag_key}{INDEX_SEPARATOR}{tag.tag_value}" for tag in filters.tags
         ]
     _append(filter_parts, _build_or_filters(METADATA_LIST, tag_attributes))
+
+    taxonomy_leaf_attributes = None
+    if filters.taxonomy_leaf_ids:
+        taxonomy_leaf_attributes = [
+            f"{TAXONOMY_METADATA_LEAF_KEY}{INDEX_SEPARATOR}{leaf_id}"
+            for leaf_id in filters.taxonomy_leaf_ids
+        ]
+    _append(filter_parts, _build_or_filters(METADATA_LIST, taxonomy_leaf_attributes))
 
     # Knowledge scope: explicit knowledge attachments restrict what an
     # assistant can see.  When none are set, the assistant can see

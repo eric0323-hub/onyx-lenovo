@@ -11,6 +11,8 @@ from onyx.configs.app_configs import MAX_ALLOWED_UPLOAD_SIZE_MB
 from onyx.configs.constants import NotificationType
 from onyx.configs.constants import QueryHistoryType
 from onyx.db.models import Notification as NotificationDBModel
+from onyx.taxonomy.models import TaxonomySearchApplyTo
+from onyx.taxonomy.models import TaxonomySearchMode
 from shared_configs.configs import POSTGRES_DEFAULT_SCHEMA
 
 DEFAULT_FILE_TOKEN_COUNT_THRESHOLD_K_VECTOR_DB = 200
@@ -115,6 +117,32 @@ class Settings(BaseModel):
 
     # OpenSearch migration
     opensearch_indexing_enabled: bool = False
+
+    # Taxonomy Search settings
+    taxonomy_search_enabled: bool = False
+    taxonomy_search_mode: TaxonomySearchMode = TaxonomySearchMode.SUGGEST_ONLY
+    taxonomy_search_apply_to: TaxonomySearchApplyTo = TaxonomySearchApplyTo.SEARCH
+    taxonomy_search_default_confidence_threshold: float = Field(default=0.8, ge=0, le=1)
+    taxonomy_search_leaf_confidence_threshold: float | None = Field(
+        default=None, ge=0, le=1
+    )
+    taxonomy_search_l2_confidence_threshold: float | None = Field(
+        default=None, ge=0, le=1
+    )
+    taxonomy_search_l1_confidence_threshold: float | None = Field(
+        default=None, ge=0, le=1
+    )
+    taxonomy_search_enable_hierarchy_fallback: bool = True
+    taxonomy_search_allow_l2_hard_filter: bool = False
+    taxonomy_search_allow_l1_hard_filter: bool = False
+    taxonomy_search_min_results_for_filtered_search: int = Field(default=5, ge=0)
+    taxonomy_search_max_leaf_expansion_count: int = Field(default=100, ge=1)
+    taxonomy_search_timeout_ms: int = Field(default=100, ge=1)
+    taxonomy_search_require_coverage_percent: float | None = Field(
+        default=None, ge=0, le=100
+    )
+    taxonomy_search_require_version_confirmed: bool = True
+    taxonomy_search_exclude_low_confidence_assignments: bool = True
 
 
 class UserSettings(Settings):

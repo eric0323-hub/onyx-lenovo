@@ -22,6 +22,7 @@ from onyx.document_index.factory import get_default_document_index
 from onyx.document_index.interfaces_new import DocumentIndex
 from onyx.llm.factory import get_default_llm
 from onyx.secondary_llm_flows.document_filter import select_sections_for_expansion
+from onyx.taxonomy.models import TaxonomySearchApplyTo
 from onyx.tools.tool_implementations.search.search_utils import (
     weighted_reciprocal_rank_fusion,
 )
@@ -60,6 +61,7 @@ def _run_single_search(
         user=user,
         persona_search_info=None,
         db_session=db_session,
+        taxonomy_apply_to=TaxonomySearchApplyTo.SEARCH,
     )
 
 

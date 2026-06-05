@@ -149,6 +149,7 @@ from onyx.server.query_and_chat.query_backend import basic_router as query_route
 from onyx.server.saml import router as saml_router
 from onyx.server.settings.api import admin_router as settings_admin_router
 from onyx.server.settings.api import basic_router as settings_router
+from onyx.server.taxonomy.api import router as taxonomy_admin_router
 from onyx.server.token_rate_limits.api import router as token_rate_limit_settings_router
 from onyx.server.user_group.api import router as user_group_router
 from onyx.server.utils import BasicAuthenticationError
@@ -524,6 +525,7 @@ def get_application(lifespan_override: Lifespan | None = None) -> FastAPI:
     include_router_with_global_prefix_prepended(application, onyx_api_router)
     include_router_with_global_prefix_prepended(application, settings_router)
     include_router_with_global_prefix_prepended(application, settings_admin_router)
+    include_router_with_global_prefix_prepended(application, taxonomy_admin_router)
     include_router_with_global_prefix_prepended(application, llm_admin_router)
     include_router_with_global_prefix_prepended(application, kg_admin_router)
     include_router_with_global_prefix_prepended(application, llm_router)

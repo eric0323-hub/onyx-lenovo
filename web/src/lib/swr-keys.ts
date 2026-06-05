@@ -49,6 +49,11 @@ export const SWR_KEYS = {
   documentSetsEditable: "/api/manage/document-set?get_editable=true",
   tags: "/api/query/valid-tags",
   connectorStatus: "/api/manage/connector-status",
+  taxonomyDashboard: "/api/admin/taxonomy/dashboard",
+  taxonomyDefaultTemplate: "/api/admin/taxonomy/default-template",
+  taxonomyVersions: "/api/admin/taxonomy/versions",
+  taxonomyDocumentTags: (documentId: string) =>
+    `taxonomy-document-tags:${documentId}`,
 
   // ── Credentials & Connectors ──────────────────────────────────────────────
   adminCredentials: "/api/manage/admin/credential",

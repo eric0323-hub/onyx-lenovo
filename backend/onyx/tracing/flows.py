@@ -39,6 +39,15 @@ class LLMFlow(StrEnum):
     CONTEXTUAL_RAG_CHUNK_CONTEXT = "contextual_rag_chunk_context"
     IMAGE_SUMMARIZATION = "image_summarization"
 
+    # Taxonomy governance
+    TAXONOMY_SUMMARY = "taxonomy_summary"
+    TAXONOMY_DRAFT_GENERATION = "taxonomy_draft_generation"
+    TAXONOMY_LAYERED_DRAFT_GENERATION = "taxonomy_layered_draft_generation"
+    TAXONOMY_DRAFT_OPTIMIZATION = "taxonomy_draft_optimization"
+    TAXONOMY_JSON_REPAIR = "taxonomy_json_repair"
+    TAXONOMY_TAGGING = "taxonomy_tagging"
+    TAXONOMY_HEALTH_CHECK = "taxonomy_health_check"
+
     # Knowledge graph
     KG_DOCUMENT_CLASSIFICATION = "kg_document_classification"
     KG_DEEP_EXTRACTION = "kg_deep_extraction"

@@ -1,0 +1,246 @@
+{
+  "source_taxonomy": {
+    "taxonomy_id": 1,
+    "active_version_id": 1,
+    "name": "企业知识库标签体系",
+    "owner_email": "ys260040@gmail.com",
+    "generated_on": "2026-06-05"
+  },
+  "documents": [
+    {
+      "filename": "article_01_power_startup_no_response.md",
+      "title": "门店终端按电源键无反应处理手册",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.0.0.0",
+        "full_path": "故障排查与修复 / 硬件与网络故障 / 设备无法启动与电源故障"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "电源适配器和指示灯无响应是核心线索"
+    },
+    {
+      "filename": "article_02_indicator_blink_battery_charge.md",
+      "title": "移动巡检设备红灯闪烁且电池无法充电",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.0.0.0",
+        "full_path": "故障排查与修复 / 硬件与网络故障 / 设备无法启动与电源故障"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "电池过放和充电回路异常"
+    },
+    {
+      "filename": "article_03_store_device_offline_wifi.md",
+      "title": "门店设备更换路由器后持续离线",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.0.0.1",
+        "full_path": "故障排查与修复 / 硬件与网络故障 / 网络连接与通信异常"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "WiFi 配置和设备离线"
+    },
+    {
+      "filename": "article_04_lan_latency_gateway_packet_loss.md",
+      "title": "局域网通信延迟导致打印任务堆积",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.0.0.1",
+        "full_path": "故障排查与修复 / 硬件与网络故障 / 网络连接与通信异常"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "局域网延迟和丢包"
+    },
+    {
+      "filename": "article_05_mobile_app_crash_after_update.md",
+      "title": "移动端升级后进入订单页闪退",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.0.1.0",
+        "full_path": "故障排查与修复 / 软件与系统故障 / 系统报错与崩溃处理"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "App 闪退和错误日志"
+    },
+    {
+      "filename": "article_06_api_timeout_500_monitoring.md",
+      "title": "服务端接口超时与 500 错误排查记录",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.0.1.0",
+        "full_path": "故障排查与修复 / 软件与系统故障 / 系统报错与崩溃处理"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "接口超时和 500 错误"
+    },
+    {
+      "filename": "article_07_cloud_sync_queue_stuck.md",
+      "title": "云端同步队列卡住导致门店库存不更新",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.0.1.1",
+        "full_path": "故障排查与修复 / 软件与系统故障 / 数据同步与存储异常"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "云端数据未同步和队列冲突"
+    },
+    {
+      "filename": "article_08_storage_full_data_recovery.md",
+      "title": "本地存储空间满导致历史记录无法保存",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.0.1.1",
+        "full_path": "故障排查与修复 / 软件与系统故障 / 数据同步与存储异常"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "存储空间不足和数据恢复"
+    },
+    {
+      "filename": "article_09_sms_code_login_blocked.md",
+      "title": "用户收不到短信验证码无法登录",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.1.0.0",
+        "full_path": "客户咨询与服务 / 账户与权限管理 / 账号注册与登录问题"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "验证码和登录保护"
+    },
+    {
+      "filename": "article_10_third_party_account_binding.md",
+      "title": "第三方账号绑定后无法使用原密码登录",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.1.0.0",
+        "full_path": "客户咨询与服务 / 账户与权限管理 / 账号注册与登录问题"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "第三方登录绑定和密码重置"
+    },
+    {
+      "filename": "article_11_subaccount_permission_isolation.md",
+      "title": "企业子账号只能查看所属区域数据的配置方法",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.1.0.1",
+        "full_path": "客户咨询与服务 / 账户与权限管理 / 权限配置与角色分配"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "子账号和数据权限隔离"
+    },
+    {
+      "filename": "article_12_admin_transfer_role_audit.md",
+      "title": "管理员角色转让与权限审计流程",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.1.0.1",
+        "full_path": "客户咨询与服务 / 账户与权限管理 / 权限配置与角色分配"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "管理员角色转让和审计"
+    },
+    {
+      "filename": "article_13_invoice_payment_failure.md",
+      "title": "信用卡支付失败后的账单与发票处理",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.1.1.0",
+        "full_path": "客户咨询与服务 / 计费与订单服务 / 账单查询与支付异常"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "支付失败和发票处理"
+    },
+    {
+      "filename": "article_14_auto_renewal_refund_policy.md",
+      "title": "自动续费取消后仍收到扣费通知的处理",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.1.1.1",
+        "full_path": "客户咨询与服务 / 计费与订单服务 / 订阅管理与退换货"
+      },
+      "secondary_expected": [
+        {
+          "leaf_node_id": "v1.generated.1.1.0",
+          "full_path": "客户咨询与服务 / 计费与订单服务 / 账单查询与支付异常"
+        }
+      ],
+      "coverage_type": "multi",
+      "notes": "主线是取消续费和退款，账单扣费可作为次标签"
+    },
+    {
+      "filename": "article_15_first_time_setup_quickstart.md",
+      "title": "新设备开箱后的首次配置流程",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.2.0.0",
+        "full_path": "产品说明与培训 / 产品操作与指南 / 基础功能与快速入门"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "开箱和首次配置"
+    },
+    {
+      "filename": "article_16_new_user_faq_dashboard.md",
+      "title": "后台首页核心功能新手问答",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.2.0.0",
+        "full_path": "产品说明与培训 / 产品操作与指南 / 基础功能与快速入门"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "新手 FAQ 和核心功能入口"
+    },
+    {
+      "filename": "article_17_webhook_automation_workflow.md",
+      "title": "使用 Webhook 构建售后自动化工作流",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.2.0.1",
+        "full_path": "产品说明与培训 / 产品操作与指南 / 高级功能与最佳实践"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "API 和 Webhook 自动化"
+    },
+    {
+      "filename": "article_18_multitenant_advanced_config.md",
+      "title": "多租户数据隔离的高级配置建议",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.2.0.1",
+        "full_path": "产品说明与培训 / 产品操作与指南 / 高级功能与最佳实践"
+      },
+      "secondary_expected": [
+        {
+          "leaf_node_id": "v1.generated.1.0.1",
+          "full_path": "客户咨询与服务 / 账户与权限管理 / 权限配置与角色分配"
+        }
+      ],
+      "coverage_type": "multi",
+      "notes": "主线是高级多租户配置，权限隔离可作为次标签"
+    },
+    {
+      "filename": "article_19_complaint_sop_work_order.md",
+      "title": "客户投诉升级与工单流转标准流程",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.2.1.0",
+        "full_path": "产品说明与培训 / 培训与赋能资料 / 客服话术与标准流程"
+      },
+      "secondary_expected": [],
+      "coverage_type": "single",
+      "notes": "投诉处理 SOP 和工单流转"
+    },
+    {
+      "filename": "article_20_l2_technical_training_case_review.md",
+      "title": "二线技术支持排障案例复盘课件",
+      "primary_expected": {
+        "leaf_node_id": "v1.generated.2.1.1",
+        "full_path": "产品说明与培训 / 培训与赋能资料 / 技术支持与内部培训"
+      },
+      "secondary_expected": [
+        {
+          "leaf_node_id": "v1.generated.0.1.0",
+          "full_path": "故障排查与修复 / 软件与系统故障 / 系统报错与崩溃处理"
+        }
+      ],
+      "coverage_type": "multi",
+      "notes": "主线是内部技术培训，案例涉及接口超时排障"
+    }
+  ]
+}

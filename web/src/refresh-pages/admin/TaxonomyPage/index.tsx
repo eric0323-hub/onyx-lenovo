@@ -1,8 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import Tree from "rc-tree";
 import type { TreeNodeProps, TreeProps } from "rc-tree";
 import useSWR from "swr";
@@ -46,6 +45,7 @@ import {
   SvgSparkle,
   SvgTag,
   SvgTrash,
+  SvgUploadCloud,
 } from "@opal/icons";
 import type { IconProps } from "@opal/types";
 import { toast } from "@/hooks/useToast";
@@ -55,6 +55,7 @@ import {
   fetchDocumentTaxonomyTags,
   generateSummaries,
   generateTaxonomyDraftStream,
+  importArticles,
   matchTaxonomyQuery,
   runTagging,
   updateSummary,
@@ -1772,13 +1773,8 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
           </div>
         </CardLayout.Header>
         <Divider paddingParallel="fit" paddingPerpendicular="fit" />
-        <Section
-          className="px-2 pb-2 pt-4"
-          gap={0.75}
-          alignItems="stretch"
-          justifyContent="start"
-        >
-          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_9rem] md:items-stretch">
+        <Section className="p-2" gap={0.75} alignItems="stretch">
+          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_7rem] md:items-stretch">
             <InputTextArea
               value={generationPrompt}
               onChange={(e) => setGenerationPrompt(e.target.value)}
@@ -1787,11 +1783,10 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
               autoResize
               placeholder="例如：我们是一家制造业企业，知识库包含制度流程、质量管理、设备运维、售后维修、产品手册和安全生产文档。重点关注一线员工查找制度、维修手册和质量问题复盘的场景。"
             />
-            <div className="w-full md:h-full [&_.interactive-container]:h-full">
+            <div className="flex items-end [&_.interactive-container]:h-12 md:[&_.interactive-container]:h-16">
               <Button
                 icon={isGeneratingTaxonomy ? SpinningLoaderIcon : SvgSparkle}
                 prominence="primary"
-                size="lg"
                 onClick={handleGenerate}
                 disabled={isGeneratingTaxonomy}
                 width="full"
@@ -2081,12 +2076,139 @@ function ImportedArticleRow({
   );
 }
 
+function ImportArticlesModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const reset = () => {
+    setFiles([]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleClose = () => {
+    if (submitting) {
+      return;
+    }
+    reset();
+    onClose();
+  };
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setFiles(Array.from(event.target.files ?? []));
+  };
+
+  const handleSubmit = async () => {
+    if (!files.length) {
+      toast.error("请选择要导入的 Markdown 或 PDF 文件");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const result = await importArticles(files);
+      if (result.imported.length) {
+        toast.success(`已导入 ${result.imported.length} 篇文章`);
+      }
+      if (result.failed.length) {
+        toast.error(`${result.failed.length} 个文件导入失败`, {
+          description: result.failed
+            .map((item) => `${item.file_name}: ${item.detail ?? "导入失败"}`)
+            .join("\n"),
+        });
+      }
+      if (result.imported.length) {
+        reset();
+        onClose();
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "文章导入失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
+      <Modal.Content width="md" height="fit">
+        <Modal.Header
+          icon={SvgUploadCloud}
+          title="导入文章"
+          description="上传 Markdown 或 PDF 文件，系统会复用现有文档入库、解析、Summary 和打标签链路。"
+          onClose={handleClose}
+        />
+        <Modal.Body>
+          <Section gap={0.75} alignItems="stretch">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".md,.markdown,.pdf,text/markdown,text/x-markdown,application/pdf"
+              multiple
+              onChange={handleFileChange}
+              className="hidden"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                icon={SvgUploadCloud}
+                prominence="secondary"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={submitting}
+              >
+                选择文件
+              </Button>
+              <Text as="span" font="secondary-body" color="text-03">
+                {files.length ? `${files.length} 个文件已选择` : "未选择文件"}
+              </Text>
+            </div>
+            {files.length > 0 && (
+              <Section gap={0.25} alignItems="stretch">
+                {files.map((file) => (
+                  <Text
+                    key={`${file.name}-${file.size}-${file.lastModified}`}
+                    as="p"
+                    font="secondary-body"
+                    color="text-03"
+                    maxLines={1}
+                  >
+                    {file.name}
+                  </Text>
+                ))}
+              </Section>
+            )}
+          </Section>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button prominence="secondary" onClick={handleClose}>
+            取消
+          </Button>
+          <Button
+            icon={submitting ? SpinningLoaderIcon : SvgUploadCloud}
+            prominence="primary"
+            onClick={handleSubmit}
+            disabled={submitting || !files.length}
+          >
+            {submitting ? "导入中" : "开始导入"}
+          </Button>
+        </Modal.Footer>
+      </Modal.Content>
+    </Modal>
+  );
+}
+
 function ImportedArticlesPanel({
   dashboard,
 }: {
   dashboard?: TaxonomyDashboard;
 }) {
-  const router = useRouter();
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const latestTask = getLatestImportTask(dashboard?.recent_tasks);
   const summaries = dashboard?.summaries ?? [];
   const hasActiveTaxonomy = Boolean(dashboard?.taxonomy?.active_version_id);
@@ -2103,7 +2225,7 @@ function ImportedArticlesPanel({
       toast.error("请先创建并生效标签体系，再导入文章");
       return;
     }
-    router.push("/admin/connectors/file");
+    setImportModalOpen(true);
   };
 
   return (
@@ -2120,7 +2242,7 @@ function ImportedArticlesPanel({
                 variant="section"
               />
             </div>
-            <div className="flex flex-wrap items-center justify-start gap-2 md:justify-end">
+            <div className="flex flex-wrap items-center justify-start gap-1.5 md:justify-end">
               <Button
                 icon={SvgPlus}
                 prominence="primary"
@@ -2155,11 +2277,30 @@ function ImportedArticlesPanel({
               ))}
             </Section>
           ) : (
-            <EmptyMessageCard sizePreset="main-ui" title="还没有导入文章" />
+            <ImportedArticlesEmptyState />
           )}
         </Section>
       </Card>
+      <ImportArticlesModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+      />
     </Section>
+  );
+}
+
+function ImportedArticlesEmptyState() {
+  return (
+    <div className="flex justify-center px-2 pb-5 pt-7">
+      <Content
+        icon={SvgFileText}
+        title="暂无导入文章"
+        sizePreset="secondary"
+        variant="body"
+        color="muted"
+        width="fit"
+      />
+    </div>
   );
 }
 

@@ -1,6 +1,7 @@
 import { mutate } from "swr";
 import { SWR_KEYS } from "@/lib/swr-keys";
 import {
+  ArticleImportResponse,
   DocumentTaxonomyTag,
   TaxonomyDraftStreamEvent,
   TaxonomyNode,
@@ -155,6 +156,21 @@ export async function generateSummaries(args: {
     "/api/admin/taxonomy/summaries/generate",
     args
   );
+  await mutate(SWR_KEYS.taxonomyDashboard);
+  return result;
+}
+
+export async function importArticles(files: File[]): Promise<ArticleImportResponse> {
+  const formData = new FormData();
+  files.forEach((file) => {
+    formData.append("files", file);
+  });
+
+  const response = await fetch("/api/admin/taxonomy/articles/import", {
+    method: "POST",
+    body: formData,
+  });
+  const result = await parseResponse<ArticleImportResponse>(response);
   await mutate(SWR_KEYS.taxonomyDashboard);
   return result;
 }

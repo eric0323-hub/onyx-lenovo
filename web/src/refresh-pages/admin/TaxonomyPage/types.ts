@@ -140,6 +140,18 @@ export interface DocumentTaxonomySummary {
   current_label_status?: string | null;
 }
 
+export interface ArticleImportItem {
+  file_name: string;
+  document_id?: string | null;
+  status: string;
+  detail?: string | null;
+}
+
+export interface ArticleImportResponse {
+  imported: ArticleImportItem[];
+  failed: ArticleImportItem[];
+}
+
 export interface TaxonomyTaggingTask {
   id: number;
   version_id?: number | null;

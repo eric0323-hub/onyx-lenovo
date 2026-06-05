@@ -64,6 +64,7 @@ class OnyxFileExtensions:
     PLAIN_TEXT_EXTENSIONS = {
         ".txt",
         ".md",
+        ".markdown",
         ".mdx",
         ".conf",
         ".log",

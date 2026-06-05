@@ -208,6 +208,18 @@ class UpdateSummaryRequest(BaseModel):
     summary: str
 
 
+class ArticleImportItem(BaseModel):
+    file_name: str
+    document_id: str | None = None
+    status: str
+    detail: str | None = None
+
+
+class ArticleImportResponse(BaseModel):
+    imported: list[ArticleImportItem] = Field(default_factory=list)
+    failed: list[ArticleImportItem] = Field(default_factory=list)
+
+
 class StartTaggingRequest(BaseModel):
     document_ids: list[str] = Field(default_factory=list)
     source: TaxonomyTaggingSource = TaxonomyTaggingSource.SUMMARY

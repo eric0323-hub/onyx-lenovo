@@ -1,0 +1,7 @@
+[mcp_servers.playwright]
+args = [
+    "@playwright/mcp@0.0.75",
+    "--headless",
+    "--isolated",
+]
+command = "npx"

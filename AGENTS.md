@@ -27,21 +27,18 @@ Onyx uses Celery for asynchronous task processing with multiple specialized work
 #### Worker Types
 
 1. **Primary Worker** (`celery_app.py`)
-
    - Coordinates core background tasks and system-wide operations
    - Handles connector management, document sync, pruning, and periodic checks
    - Runs with 4 threads concurrency
    - Tasks: connector deletion, vespa sync, pruning, LLM model updates, user file sync
 
 2. **Docfetching Worker** (`docfetching`)
-
    - Fetches documents from external data sources (connectors)
    - Spawns docprocessing tasks for each document batch
    - Implements watchdog monitoring for stuck connectors
    - Configurable concurrency (default from env)
 
 3. **Docprocessing Worker** (`docprocessing`)
-
    - Processes fetched documents through the indexing pipeline:
      - Upserts documents to PostgreSQL
      - Chunks documents and adds contextual information
@@ -51,26 +48,22 @@ Onyx uses Celery for asynchronous task processing with multiple specialized work
    - Configurable concurrency (default from env)
 
 4. **Light Worker** (`light`)
-
    - Handles lightweight, fast operations
    - Tasks: vespa metadata sync, connector deletion, doc permissions upsert, checkpoint cleanup, index attempt cleanup
    - Higher concurrency for quick tasks
 
 5. **Heavy Worker** (`heavy`)
-
    - Handles resource-intensive operations
    - Tasks: connector pruning, document permissions sync, external group sync, CSV generation
    - Runs with 4 threads concurrency
 
 6. **Monitoring Worker** (`monitoring`)
-
    - System health monitoring and metrics collection
    - Monitors Celery queues, process memory, and system status
    - Single thread (monitoring doesn't need parallelism)
    - Cloud-specific monitoring tasks
 
 7. **User File Processing Worker** (`user_file_processing`)
-
    - Processes user-uploaded files
    - Handles user file indexing and project synchronization
    - Configurable concurrency
@@ -168,6 +161,45 @@ web/
 ## Frontend Standards
 
 Frontend standards for the `web/` and `desktop/` projects live in `web/AGENTS.md`.
+
+### Core UI Rules (Mandatory)
+
+- **Always prioritize the Opal Design System**:
+  - New components and pages → `web/lib/opal/src/` (especially `@opal/components`, `@opal/layouts`)
+  - Production components → `web/src/refresh-components/`
+  - **Never** use legacy components in `web/src/components/` (being phased out)
+  - Card-style components → `web/src/sections/cards/`
+
+- **Typography & Layout Consistency** (to prevent messy layouts):
+  - **Always** use the Opal `Text` component for all text (with `font` and `color` props). **Never** use naked `<div>`, `<p>`, `<h1>`, `<span>`, etc.
+  - Default `size` variant for all components is `"md"` unless explicitly required otherwise.
+  - Use Opal layout primitives: `Content`, `ContentAction`, `IllustrationContent`, `SettingsLayouts`, etc.
+  - Strictly follow the project's spacing scale, typography hierarchy, and design tokens.
+
+- **Size & Visual Balance**:
+  - Maintain consistent component sizing and spacing.
+  - Ensure proper visual hierarchy and proportional sizing across the page.
+  - Always check responsiveness (mobile-first).
+
+- **Other Strict Rules**:
+  - Icons: Only use icons from `web/src/icons/`. Do not use lucide/react-icons or other external libraries.
+  - Do not use manual `dark:` Tailwind modifiers (except for logo icons).
+  - Buttons must use Opal `Button` with correct `variant`, `prominence`, and `size`.
+  - New settings/admin pages must be wrapped in `SettingsLayouts`.
+
+### Agent Execution Requirements
+
+- For any task involving UI, pages, components, or styling:
+  1. First read `web/AGENTS.md` and relevant Opal components.
+  2. Strictly match the existing project UI style, spacing, and typography.
+  3. After implementation, use Playwright to open `http://localhost:3000` and verify layout, typography, and visual consistency.
+  4. Fix any spacing, size, or typography issues immediately.
+
+**Recommended Skills (Auto-activated for frontend tasks)**:
+
+- `frontend-skill` / `frontend-design` (typography, spacing, polish, consistency)
+- `ui-ux-pro-max` (product feel and visual quality)
+- Playwright (visual validation)
 
 ## Database & Migrations
 

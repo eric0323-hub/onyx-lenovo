@@ -702,6 +702,25 @@ def get_document_summaries(
     return snapshots
 
 
+def get_document_ids_missing_complete_summary(
+    db_session: Session,
+    *,
+    document_ids: list[str],
+) -> list[str]:
+    if not document_ids:
+        return []
+
+    complete_document_ids = set(
+        db_session.scalars(
+            select(DocumentTaxonomySummary.document_id).where(
+                DocumentTaxonomySummary.document_id.in_(document_ids),
+                DocumentTaxonomySummary.status == TaxonomySummaryStatus.COMPLETE,
+            )
+        ).all()
+    )
+    return [document_id for document_id in document_ids if document_id not in complete_document_ids]
+
+
 def get_taxonomy_coverage(db_session: Session) -> TaxonomyCoverageStats:
     total_documents = db_session.scalar(select(func.count(Document.id))) or 0
     labeled_documents = (

@@ -4,6 +4,9 @@ from collections.abc import Iterator
 from threading import Lock
 
 from onyx.db.enums import TaxonomyNodeLevel
+from onyx.db.enums import TaxonomyNodeSource
+from onyx.db.enums import TaxonomyNodeStatus
+from onyx.db.models import TaxonomyNode
 from onyx.llm.constants import LlmProviderNames
 from onyx.llm.interfaces import LLM
 from onyx.llm.interfaces import LLMConfig
@@ -17,6 +20,8 @@ from onyx.llm.models import ReasoningEffort
 from onyx.llm.models import ToolChoiceOptions
 from onyx.taxonomy.llm_service import generate_taxonomy_draft
 from onyx.taxonomy.llm_service import generate_taxonomy_draft_events
+from onyx.taxonomy.llm_service import review_taxonomy_candidate_labels
+from onyx.taxonomy.llm_service import TaxonomyCandidateForHealthCheck
 
 
 class StubLLM(LLM):
@@ -114,6 +119,39 @@ class RoutingStubLLM(StubLLM):
                     choice=Choice(message=Message(content=content)),
                 )
         raise AssertionError(f"No stub response for prompt: {prompt_text[:200]}")
+
+
+def _taxonomy_node(
+    *,
+    node_id: str,
+    level: TaxonomyNodeLevel,
+    name: str,
+    parent_id: str | None = None,
+    code: str | None = None,
+) -> TaxonomyNode:
+    return TaxonomyNode(
+        id=node_id,
+        version_id=1,
+        parent_id=parent_id,
+        level=level,
+        code=code or node_id,
+        name=name,
+        full_path=f"客户服务 / 售后处理 / {name}"
+        if level == TaxonomyNodeLevel.LEAF
+        else f"客户服务 / {name}",
+        path_node_ids=["l1", parent_id or node_id, node_id]
+        if level == TaxonomyNodeLevel.LEAF
+        else ["l1", node_id],
+        sort_order=0,
+        definition=f"{name}定义",
+        applicability=f"{name}适用范围",
+        positive_examples=[f"{name}正例"],
+        negative_examples=[f"{name}反例"],
+        keywords=[name],
+        synonyms=[],
+        source=TaxonomyNodeSource.MANUAL,
+        status=TaxonomyNodeStatus.ACTIVE,
+    )
 
 
 def test_generate_taxonomy_draft_repairs_malformed_json() -> None:
@@ -433,3 +471,114 @@ def test_generate_taxonomy_draft_events_streams_layered_nodes_and_final() -> Non
     assert events[-1].progress == 100
     assert events[-1].nodes is not None
     assert events[-1].nodes[0].children[0].children[0].name == "故障排查"
+
+
+def test_review_taxonomy_candidate_labels_sanitizes_agent_decisions() -> None:
+    llm = StubLLM(
+        [
+            """
+{
+  "decisions": [
+    {
+      "candidate_id": 1,
+      "action": "reuse_existing",
+      "reason": "已有故障排查可覆盖",
+      "suggested_reuse_node_id": "leaf_existing",
+      "parent_l2_node_id": null,
+      "leaf": null
+    },
+    {
+      "candidate_id": 2,
+      "action": "add_leaf",
+      "reason": "需要补充最小粒度叶子",
+      "suggested_reuse_node_id": null,
+      "parent_l2_node_id": "l2_support",
+      "leaf": {
+        "name": "远程诊断",
+        "definition": "远程排查和诊断设备问题",
+        "applicability": "远程日志、远程检测、远程定位",
+        "keywords": ["远程诊断"],
+        "synonyms": ["远程排查"],
+        "positive_examples": ["通过远程日志定位故障"],
+        "negative_examples": ["线下维修排期"]
+      }
+    },
+    {
+      "candidate_id": 3,
+      "action": "reuse_existing",
+      "reason": "无效 leaf id",
+      "suggested_reuse_node_id": "missing_leaf",
+      "parent_l2_node_id": null,
+      "leaf": null
+    }
+  ]
+}
+"""
+        ]
+    )
+
+    decisions = review_taxonomy_candidate_labels(
+        candidates=[
+            TaxonomyCandidateForHealthCheck(
+                candidate_id=1,
+                document_id="doc-1",
+                path=["客户服务", "售后处理", "故障排查变体"],
+                definition="故障排查变体定义",
+                evidence="设备无法启动",
+                confidence=0.8,
+            ),
+            TaxonomyCandidateForHealthCheck(
+                candidate_id=2,
+                document_id="doc-2",
+                path=["客户服务", "售后处理", "远程诊断"],
+                definition="远程诊断定义",
+                evidence="远程日志定位故障",
+                confidence=0.9,
+            ),
+            TaxonomyCandidateForHealthCheck(
+                candidate_id=3,
+                document_id="doc-3",
+                path=["客户服务", "售后处理", "未知复用"],
+                definition="未知复用定义",
+                evidence="未知证据",
+                confidence=0.7,
+            ),
+            TaxonomyCandidateForHealthCheck(
+                candidate_id=4,
+                document_id="doc-4",
+                path=["客户服务", "售后处理", "未返回候选"],
+                definition="未返回定义",
+                evidence="未返回证据",
+                confidence=0.6,
+            ),
+        ],
+        leaf_nodes=[
+            _taxonomy_node(
+                node_id="leaf_existing",
+                level=TaxonomyNodeLevel.LEAF,
+                name="故障排查",
+                parent_id="l2_support",
+            )
+        ],
+        l2_nodes=[
+            _taxonomy_node(
+                node_id="l2_support",
+                level=TaxonomyNodeLevel.L2,
+                name="售后处理",
+            )
+        ],
+        optimization_strength="balanced",
+        llm=llm,
+    )
+
+    decision_by_id = {decision.candidate_id: decision for decision in decisions}
+    assert decision_by_id[1].action == "reuse_existing"
+    assert decision_by_id[1].suggested_reuse_node_id == "leaf_existing"
+    assert decision_by_id[2].action == "add_leaf"
+    assert decision_by_id[2].parent_l2_node_id == "l2_support"
+    assert decision_by_id[2].leaf_name == "远程诊断"
+    assert decision_by_id[2].keywords == ["远程诊断"]
+    assert decision_by_id[3].action == "needs_handling"
+    assert decision_by_id[3].suggested_reuse_node_id is None
+    assert decision_by_id[4].action == "needs_handling"
+    assert len(llm.invoke_calls) == 1

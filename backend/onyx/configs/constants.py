@@ -196,6 +196,8 @@ CELERY_USER_FILE_DELETE_TASK_EXPIRES = 60  # 1 minute (in seconds)
 # Max queue depth before the delete beat stops enqueuing more delete tasks.
 USER_FILE_DELETE_MAX_QUEUE_DEPTH = 500
 
+CELERY_TAXONOMY_ARTICLE_IMPORT_TASK_EXPIRES = 15 * 60  # 15 minutes (in seconds)
+
 DANSWER_REDIS_FUNCTION_LOCK_PREFIX = "da_function_lock:"
 
 TMP_DRALPHA_PERSONA_NAME = "KG Beta"
@@ -426,6 +428,7 @@ class OnyxCeleryQueues:
     CONNECTOR_EXTERNAL_GROUP_SYNC = "connector_external_group_sync"
     CONNECTOR_HIERARCHY_FETCHING = "connector_hierarchy_fetching"
     CSV_GENERATION = "csv_generation"
+    TAXONOMY_PROCESSING = "taxonomy_processing"
 
     # User file processing queue
     USER_FILE_PROCESSING = "user_file_processing"
@@ -617,6 +620,8 @@ class OnyxCeleryTask:
     PERFORM_TTL_MANAGEMENT_TASK = "perform_ttl_management_task"
 
     GENERATE_USAGE_REPORT_TASK = "generate_usage_report_task"
+
+    PROCESS_TAXONOMY_ARTICLE_IMPORT = "process_taxonomy_article_import"
 
     EVAL_RUN_TASK = "eval_run_task"
     SCHEDULED_EVAL_TASK = "scheduled_eval_task"

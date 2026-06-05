@@ -6,7 +6,10 @@ import type {
 } from "@opal/types";
 import { Text, type TooltipSide, Tooltip } from "@opal/components";
 import type { IconFunctionComponent } from "@opal/types";
-import { iconWrapper } from "@opal/components/buttons/icon-wrapper";
+import {
+  iconVariants,
+  iconWrapper,
+} from "@opal/components/buttons/icon-wrapper";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,6 +53,22 @@ type ButtonProps = InteractiveStatelessProps &
 // Button
 // ---------------------------------------------------------------------------
 
+function ButtonIconSpacer({ size }: { size: ContainerSizeVariants }) {
+  const { padding, size: iconSize } = iconVariants[size];
+
+  return (
+    <div aria-hidden="true" className={`${padding} invisible`}>
+      <div
+        className="shrink-0"
+        style={{
+          height: `${iconSize}rem`,
+          width: `${iconSize}rem`,
+        }}
+      />
+    </div>
+  );
+}
+
 function Button({
   icon: Icon,
   children,
@@ -64,6 +83,8 @@ function Button({
   ...interactiveProps
 }: ButtonProps) {
   const isLarge = size === "lg";
+  const shouldBalanceLeftIcon = Boolean(children && !Icon && RightIcon);
+  const shouldBalanceRightIcon = Boolean(children && Icon && !RightIcon);
 
   const labelEl = children ? (
     responsiveHideText ? (
@@ -85,6 +106,16 @@ function Button({
       </Text>
     )
   ) : null;
+  const leftIconEl = Icon
+    ? iconWrapper(Icon, size, false)
+    : shouldBalanceLeftIcon
+      ? <ButtonIconSpacer size={size} />
+      : null;
+  const rightIconEl = RightIcon
+    ? iconWrapper(RightIcon, size, false)
+    : shouldBalanceRightIcon
+      ? <ButtonIconSpacer size={size} />
+      : null;
 
   const button = (
     <Interactive.Stateless
@@ -100,15 +131,15 @@ function Button({
         rounding={isLarge ? "md" : size === "2xs" ? "xs" : "sm"}
       >
         <div className="flex flex-row items-center gap-1">
-          {iconWrapper(Icon, size, !!children)}
+          {leftIconEl}
 
           {labelEl}
           {responsiveHideText ? (
             <span className="hidden md:inline-flex">
-              {iconWrapper(RightIcon, size, !!children)}
+              {rightIconEl}
             </span>
           ) : (
-            iconWrapper(RightIcon, size, !!children)
+            rightIconEl
           )}
         </div>
       </Interactive.Container>

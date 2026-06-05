@@ -162,6 +162,7 @@ def _collect_queue_metrics(redis_celery: Redis) -> list[Metric]:
         "checkpoint_cleanup_queue_length": OnyxCeleryQueues.CHECKPOINT_CLEANUP,
         "index_attempt_cleanup_queue_length": OnyxCeleryQueues.INDEX_ATTEMPT_CLEANUP,
         "csv_generation_queue_length": OnyxCeleryQueues.CSV_GENERATION,
+        "taxonomy_processing_queue_length": OnyxCeleryQueues.TAXONOMY_PROCESSING,
         "user_file_processing_queue_length": OnyxCeleryQueues.USER_FILE_PROCESSING,
         "user_file_project_sync_queue_length": OnyxCeleryQueues.USER_FILE_PROJECT_SYNC,
         "user_file_delete_queue_length": OnyxCeleryQueues.USER_FILE_DELETE,

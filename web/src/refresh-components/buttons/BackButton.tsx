@@ -7,11 +7,13 @@ import { SvgArrowLeft } from "@opal/icons";
 
 export interface BackButtonProps {
   behaviorOverride?: () => void;
+  label?: string;
   routerOverride?: string;
 }
 
 export default function BackButton({
   behaviorOverride,
+  label = "Back",
   routerOverride,
 }: BackButtonProps) {
   const router = useRouter();
@@ -30,7 +32,7 @@ export default function BackButton({
         }
       }}
     >
-      Back
+      {label}
     </Button>
   );
 }

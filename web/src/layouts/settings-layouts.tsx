@@ -175,6 +175,7 @@ export interface SettingsHeaderProps {
   children?: React.ReactNode;
   rightChildren?: React.ReactNode;
   backButton?: boolean;
+  backButtonLabel?: string;
   onBack?: () => void;
   divider?: boolean;
 }
@@ -185,6 +186,7 @@ function SettingsHeader({
   children,
   rightChildren,
   backButton,
+  backButtonLabel,
   onBack,
   divider,
 }: SettingsHeaderProps) {
@@ -227,7 +229,7 @@ function SettingsHeader({
     >
       {backButton && (
         <div className="px-2">
-          <BackButton behaviorOverride={onBack} />
+          <BackButton behaviorOverride={onBack} label={backButtonLabel} />
         </div>
       )}
 

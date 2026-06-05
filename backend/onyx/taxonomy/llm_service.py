@@ -61,9 +61,42 @@ class TaxonomyTaggingResult:
     candidates: list[TaxonomyCandidateRecommendation]
 
 
+@dataclass(frozen=True)
+class TaxonomyCandidateForHealthCheck:
+    candidate_id: int
+    document_id: str
+    path: list[str]
+    definition: str
+    evidence: str
+    confidence: float
+
+
+@dataclass(frozen=True)
+class TaxonomyCandidateHealthDecision:
+    candidate_id: int
+    action: str
+    reason: str
+    suggested_reuse_node_id: str | None = None
+    parent_l2_node_id: str | None = None
+    leaf_name: str | None = None
+    definition: str | None = None
+    applicability: str | None = None
+    keywords: list[str] | None = None
+    synonyms: list[str] | None = None
+    positive_examples: list[str] | None = None
+    negative_examples: list[str] | None = None
+
+
 class TaxonomyJsonParseError(ValueError):
     pass
 
+
+TAXONOMY_HEALTH_DECISION_ACTIONS = {
+    "reuse_existing",
+    "add_leaf",
+    "reject",
+    "needs_handling",
+}
 
 SYSTEM_TAXONOMY_QUALITY_CRITERIA = """
 统一优化指标：
@@ -851,6 +884,8 @@ def recommend_taxonomy_tags(
 - 若无法覆盖，写 unmatched_reason。
 - enable_optimization={str(enable_optimization).lower()}。只有为 true 时，才允许输出 candidates。
 - candidates 必须是完整三级路径，字段 path 为长度 3 的数组。
+- candidates 只是候选新增标签建议，不做最终新增决定；冗余和是否新增由后续 Taxonomy 健康自检 Agent 统一判断。
+- 优先复用候选 leaf；只有当前 leaf 无法覆盖且 enable_optimization=true 时才输出 candidates。
 
 输出 JSON 结构：
 {{
@@ -931,6 +966,199 @@ def recommend_taxonomy_tags(
         else None,
         candidates=candidates,
     )
+
+
+def _coerce_str_list(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def review_taxonomy_candidate_labels(
+    *,
+    candidates: list[TaxonomyCandidateForHealthCheck],
+    leaf_nodes: list[TaxonomyNode],
+    l2_nodes: list[TaxonomyNode],
+    optimization_strength: str | None,
+    llm: LLM | None = None,
+) -> list[TaxonomyCandidateHealthDecision]:
+    if not candidates:
+        return []
+    if not leaf_nodes:
+        raise ValueError("Cannot health-check taxonomy candidates without leaf nodes")
+    if not l2_nodes:
+        raise ValueError("Cannot add taxonomy leaf labels without l2 nodes")
+
+    llm = llm or get_default_llm(temperature=0)
+    candidate_by_id = {candidate.candidate_id: candidate for candidate in candidates}
+    valid_candidate_ids = set(candidate_by_id)
+    valid_leaf_ids = {node.id for node in leaf_nodes}
+    valid_l2_ids = {node.id for node in l2_nodes}
+    candidate_cards = json.dumps(
+        [
+            {
+                "candidate_id": candidate.candidate_id,
+                "document_id": candidate.document_id,
+                "path": candidate.path,
+                "definition": candidate.definition,
+                "evidence": candidate.evidence,
+                "confidence": candidate.confidence,
+            }
+            for candidate in candidates
+        ],
+        ensure_ascii=False,
+        indent=2,
+    )
+    leaf_cards = "\n".join(
+        f"- id: {node.id}\n  path: {node.full_path}\n  definition: {node.definition}\n"
+        f"  applicability: {node.applicability}\n"
+        f"  keywords: {', '.join(node.keywords or [])}\n"
+        f"  synonyms: {', '.join(node.synonyms or [])}\n"
+        f"  positive: {', '.join(node.positive_examples or [])}\n"
+        f"  negative: {', '.join(node.negative_examples or [])}"
+        for node in leaf_nodes
+    )
+    l2_cards = "\n".join(
+        f"- id: {node.id}\n  path: {node.full_path}\n  definition: {node.definition}\n"
+        f"  applicability: {node.applicability}\n"
+        f"  keywords: {', '.join(node.keywords or [])}\n"
+        f"  synonyms: {', '.join(node.synonyms or [])}"
+        for node in l2_nodes
+    )
+    prompt = f"""
+你是 Taxonomy 健康自检 Agent。请统一审核一批候选新增 leaf 标签。
+
+业务目标：
+- 新增标签是例外，不是默认行为。
+- 优先复用已有 leaf；只有已有 leaf 不能覆盖时才允许新增。
+- 新增时优先在已有一级/二级主干下补充最小粒度 leaf，避免新增主干枝。
+- 维护标签体系简洁、低冗余、低复杂度。
+
+必须遵守：
+- 只输出 JSON 对象。
+- decisions 必须覆盖每个 candidate_id，且每个 candidate_id 只能出现一次。
+- action 只能是 reuse_existing、add_leaf、reject、needs_handling。
+- reuse_existing 必须给出已有 leaf 的 suggested_reuse_node_id。
+- add_leaf 必须给出已有二级节点 parent_l2_node_id，不允许新增一级或二级节点。
+- add_leaf 的 leaf 需要包含 name、definition、applicability、keywords、synonyms、positive_examples、negative_examples。
+- 如果候选需要新增一级或二级主干，输出 needs_handling，不要 add_leaf。
+- 如果候选只是同义词、命名变体、细粒度重复或可被已有 leaf 覆盖，输出 reuse_existing。
+- 如果候选语义不清、证据不足、路径不符合三级结构，输出 reject 或 needs_handling。
+- 批量内候选之间也要去重；语义相同的多个候选应复用同一个 add_leaf 决策或复用已有 leaf。
+- optimization_strength={optimization_strength or ""}
+
+输出 JSON 结构：
+{{
+  "decisions": [
+    {{
+      "candidate_id": 1,
+      "action": "reuse_existing|add_leaf|reject|needs_handling",
+      "reason": "...",
+      "suggested_reuse_node_id": null,
+      "parent_l2_node_id": null,
+      "leaf": {{
+        "name": "...",
+        "definition": "...",
+        "applicability": "...",
+        "keywords": ["..."],
+        "synonyms": ["..."],
+        "positive_examples": ["..."],
+        "negative_examples": ["..."]
+      }}
+    }}
+  ]
+}}
+
+已有二级节点，只能从这里选择新增 leaf 的挂载位置：
+{l2_cards}
+
+已有 leaf，用于复用和冗余判断：
+{leaf_cards}
+
+候选新增标签：
+{candidate_cards}
+"""
+    parsed = _invoke_json(
+        llm=llm,
+        prompt=prompt,
+        flow=LLMFlow.TAXONOMY_HEALTH_CHECK,
+        max_tokens=max(2500, len(candidates) * 500),
+    )
+    raw_decisions = parsed.get("decisions")
+    if not isinstance(raw_decisions, list):
+        raise ValueError("LLM taxonomy health response did not include decisions")
+
+    decisions: list[TaxonomyCandidateHealthDecision] = []
+    seen_candidate_ids: set[int] = set()
+    for raw_decision in raw_decisions:
+        if not isinstance(raw_decision, dict):
+            continue
+        try:
+            candidate_id = int(raw_decision.get("candidate_id"))
+        except (TypeError, ValueError):
+            continue
+        if candidate_id not in valid_candidate_ids or candidate_id in seen_candidate_ids:
+            continue
+
+        action = str(raw_decision.get("action") or "needs_handling").strip()
+        if action not in TAXONOMY_HEALTH_DECISION_ACTIONS:
+            action = "needs_handling"
+
+        suggested_reuse_node_id = raw_decision.get("suggested_reuse_node_id")
+        if suggested_reuse_node_id is not None:
+            suggested_reuse_node_id = str(suggested_reuse_node_id).strip() or None
+        parent_l2_node_id = raw_decision.get("parent_l2_node_id")
+        if parent_l2_node_id is not None:
+            parent_l2_node_id = str(parent_l2_node_id).strip() or None
+
+        if action == "reuse_existing" and suggested_reuse_node_id not in valid_leaf_ids:
+            action = "needs_handling"
+            suggested_reuse_node_id = None
+        if action == "add_leaf" and parent_l2_node_id not in valid_l2_ids:
+            action = "needs_handling"
+            parent_l2_node_id = None
+
+        raw_leaf = raw_decision.get("leaf")
+        leaf = raw_leaf if isinstance(raw_leaf, dict) else {}
+        candidate = candidate_by_id[candidate_id]
+        fallback_name = candidate.path[-1] if candidate.path else "未命名标签"
+        leaf_name = str(leaf.get("name") or fallback_name).strip()
+        if action == "add_leaf" and not leaf_name:
+            action = "needs_handling"
+
+        decisions.append(
+            TaxonomyCandidateHealthDecision(
+                candidate_id=candidate_id,
+                action=action,
+                reason=str(raw_decision.get("reason") or "").strip(),
+                suggested_reuse_node_id=suggested_reuse_node_id,
+                parent_l2_node_id=parent_l2_node_id,
+                leaf_name=leaf_name or None,
+                definition=str(leaf.get("definition") or candidate.definition).strip(),
+                applicability=str(
+                    leaf.get("applicability") or candidate.definition
+                ).strip(),
+                keywords=_coerce_str_list(leaf.get("keywords")) or [leaf_name],
+                synonyms=_coerce_str_list(leaf.get("synonyms")),
+                positive_examples=_coerce_str_list(leaf.get("positive_examples"))
+                or [candidate.evidence],
+                negative_examples=_coerce_str_list(leaf.get("negative_examples"))
+                or ["不涉及该标签定义的文档"],
+            )
+        )
+        seen_candidate_ids.add(candidate_id)
+
+    for candidate in candidates:
+        if candidate.candidate_id not in seen_candidate_ids:
+            decisions.append(
+                TaxonomyCandidateHealthDecision(
+                    candidate_id=candidate.candidate_id,
+                    action="needs_handling",
+                    reason="健康自检未返回该候选标签的判断",
+                )
+            )
+
+    return decisions
 
 
 def _coerce_confidence(raw: Any) -> float:

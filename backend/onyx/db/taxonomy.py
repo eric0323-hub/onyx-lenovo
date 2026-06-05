@@ -7,6 +7,7 @@ from datetime import timezone
 from uuid import UUID
 from uuid import uuid4
 
+from sqlalchemy import delete
 from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy import update
@@ -23,9 +24,11 @@ from onyx.db.enums import TaxonomySummaryStatus
 from onyx.db.enums import TaxonomyVersionStatus
 from onyx.db.models import Connector
 from onyx.db.models import Document
+from onyx.db.models import Document__Tag
 from onyx.db.models import DocumentByConnectorCredentialPair
 from onyx.db.models import DocumentTaxonomySummary
 from onyx.db.models import DocumentTaxonomyTag
+from onyx.db.models import Tag
 from onyx.db.models import Taxonomy
 from onyx.db.models import TaxonomyChangeRecord
 from onyx.db.models import TaxonomyNode
@@ -547,13 +550,43 @@ def get_document_source(
     )
 
 
+def _delete_projected_taxonomy_document_tags(
+    db_session: Session,
+    *,
+    document_id: str,
+) -> None:
+    taxonomy_keys = [
+        TAXONOMY_METADATA_VERSION_KEY,
+        TAXONOMY_METADATA_L1_KEY,
+        TAXONOMY_METADATA_L2_KEY,
+        TAXONOMY_METADATA_LEAF_KEY,
+        TAXONOMY_METADATA_PATH_KEY,
+    ]
+    db_session.execute(
+        delete(Document__Tag).where(
+            Document__Tag.document_id == document_id,
+            Document__Tag.tag_id.in_(
+                select(Tag.id).where(Tag.tag_key.in_(taxonomy_keys))
+            ),
+        )
+    )
+
+
 def project_taxonomy_tags_to_document_metadata(
     db_session: Session,
     *,
     document_id: str,
 ) -> None:
+    db_session.flush()
+
     source = get_document_source(db_session, document_id=document_id)
     if source is None:
+        return
+
+    _delete_projected_taxonomy_document_tags(db_session, document_id=document_id)
+
+    active_version = get_active_taxonomy_version(db_session)
+    if active_version is None:
         return
 
     active_tags = list(
@@ -562,6 +595,7 @@ def project_taxonomy_tags_to_document_metadata(
             .options(selectinload(DocumentTaxonomyTag.leaf_node))
             .where(
                 DocumentTaxonomyTag.document_id == document_id,
+                DocumentTaxonomyTag.version_id == active_version.id,
                 DocumentTaxonomyTag.status == TaxonomyAssignmentStatus.ACTIVE,
                 DocumentTaxonomyTag.leaf_node_id.is_not(None),
             )

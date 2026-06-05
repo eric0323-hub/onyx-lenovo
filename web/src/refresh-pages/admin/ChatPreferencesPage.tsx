@@ -77,6 +77,23 @@ import { Tier } from "@/interfaces/settings";
 
 const route = ADMIN_ROUTES.CHAT_PREFERENCES;
 
+const TAXONOMY_SEARCH_DEFAULT_SETTINGS: Partial<Settings> = {
+  taxonomy_search_mode: TaxonomySearchMode.SUGGEST_ONLY,
+  taxonomy_search_apply_to: TaxonomySearchApplyTo.SEARCH,
+  taxonomy_search_leaf_confidence_threshold: null,
+  taxonomy_search_l2_confidence_threshold: null,
+  taxonomy_search_l1_confidence_threshold: null,
+  taxonomy_search_enable_hierarchy_fallback: true,
+  taxonomy_search_allow_l2_hard_filter: false,
+  taxonomy_search_allow_l1_hard_filter: false,
+  taxonomy_search_min_results_for_filtered_search: 5,
+  taxonomy_search_max_leaf_expansion_count: 100,
+  taxonomy_search_timeout_ms: 100,
+  taxonomy_search_require_coverage_percent: null,
+  taxonomy_search_require_version_confirmed: true,
+  taxonomy_search_exclude_low_confidence_assignments: true,
+};
+
 interface DefaultAgentConfiguration {
   tool_ids: number[];
   system_prompt: string | null;
@@ -421,7 +438,10 @@ function NumericSettingField({
       return;
     }
 
-    if ((min !== undefined && parsed < min) || (max !== undefined && parsed > max)) {
+    if (
+      (min !== undefined && parsed < min) ||
+      (max !== undefined && parsed > max)
+    ) {
       setValue(savedValue.current);
       return;
     }
@@ -1033,315 +1053,46 @@ export default function ChatPreferencesPage() {
 
           {/* Taxonomy Search */}
           <Card border="solid" rounding="lg">
-            <CardLayout.Header>
-              <div className="p-2">
-                <Content
-                  icon={SvgSearchMenu}
-                  title="Taxonomy Search"
-                  description="Use enterprise taxonomy matches as suggestions or filters during chat and search retrieval."
-                  sizePreset="main-ui"
-                  variant="section"
-                />
-              </div>
-            </CardLayout.Header>
-            <Divider paddingParallel="fit" paddingPerpendicular="fit" />
-            <Section>
-              <InputHorizontal
-                title="Enable Taxonomy Search"
-                description="Allows query-to-taxonomy matching. Filtering still depends on the selected mode and thresholds."
+            <Section gap={1}>
+              <ContentAction
+                icon={SvgSearchMenu}
+                title="Taxonomy Search"
+                description="Use enterprise taxonomy matches during chat and search retrieval."
+                sizePreset="main-ui"
+                variant="section"
+                padding="fit"
+                rightChildren={
+                  <Switch
+                    checked={s.taxonomy_search_enabled ?? false}
+                    onCheckedChange={(checked) => {
+                      void saveSettings({
+                        ...TAXONOMY_SEARCH_DEFAULT_SETTINGS,
+                        taxonomy_search_enabled: checked,
+                      });
+                    }}
+                  />
+                }
+              />
+
+              <InputVertical
+                title="Default Confidence"
+                subDescription="Minimum confidence required for taxonomy matches."
                 withLabel
               >
-                <Switch
-                  checked={s.taxonomy_search_enabled ?? false}
-                  onCheckedChange={(checked) => {
-                    void saveSettings({ taxonomy_search_enabled: checked });
-                  }}
+                <NumericSettingField
+                  name="taxonomy_search_default_confidence_threshold"
+                  value={s.taxonomy_search_default_confidence_threshold ?? 0.8}
+                  saveSettings={(updates) =>
+                    saveSettings({
+                      ...TAXONOMY_SEARCH_DEFAULT_SETTINGS,
+                      ...updates,
+                    })
+                  }
+                  min={0}
+                  max={1}
+                  placeholder="0.8"
                 />
-              </InputHorizontal>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <InputVertical
-                  title="Mode"
-                  subDescription="Controls whether matches are suggestions, soft filters, or hard filters."
-                  withLabel
-                >
-                  <InputSelect
-                    value={
-                      s.taxonomy_search_mode ??
-                      TaxonomySearchMode.SUGGEST_ONLY
-                    }
-                    onValueChange={(value) => {
-                      void saveSettings({
-                        taxonomy_search_mode: value as TaxonomySearchMode,
-                      });
-                    }}
-                  >
-                    <InputSelect.Trigger />
-                    <InputSelect.Content>
-                      <InputSelect.Item value={TaxonomySearchMode.OFF}>
-                        Off
-                      </InputSelect.Item>
-                      <InputSelect.Item
-                        value={TaxonomySearchMode.MANUAL_ONLY}
-                      >
-                        Manual only
-                      </InputSelect.Item>
-                      <InputSelect.Item
-                        value={TaxonomySearchMode.SUGGEST_ONLY}
-                      >
-                        Suggest only
-                      </InputSelect.Item>
-                      <InputSelect.Item
-                        value={TaxonomySearchMode.SOFT_FILTER_WITH_FALLBACK}
-                      >
-                        Soft filter with fallback
-                      </InputSelect.Item>
-                      <InputSelect.Item value={TaxonomySearchMode.HARD_FILTER}>
-                        Hard filter
-                      </InputSelect.Item>
-                    </InputSelect.Content>
-                  </InputSelect>
-                </InputVertical>
-
-                <InputVertical
-                  title="Apply To"
-                  subDescription="Choose where automatic taxonomy matches are allowed to participate."
-                  withLabel
-                >
-                  <InputSelect
-                    value={
-                      s.taxonomy_search_apply_to ??
-                      TaxonomySearchApplyTo.SEARCH
-                    }
-                    onValueChange={(value) => {
-                      void saveSettings({
-                        taxonomy_search_apply_to:
-                          value as TaxonomySearchApplyTo,
-                      });
-                    }}
-                  >
-                    <InputSelect.Trigger />
-                    <InputSelect.Content>
-                      <InputSelect.Item value={TaxonomySearchApplyTo.SEARCH}>
-                        Search
-                      </InputSelect.Item>
-                      <InputSelect.Item value={TaxonomySearchApplyTo.CHAT}>
-                        Chat
-                      </InputSelect.Item>
-                      <InputSelect.Item value={TaxonomySearchApplyTo.BOTH}>
-                        Both
-                      </InputSelect.Item>
-                    </InputSelect.Content>
-                  </InputSelect>
-                </InputVertical>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <InputVertical
-                  title="Default Confidence"
-                  subDescription="Used when a level-specific threshold is empty."
-                  withLabel
-                >
-                  <NumericSettingField
-                    name="taxonomy_search_default_confidence_threshold"
-                    value={s.taxonomy_search_default_confidence_threshold ?? 0.8}
-                    saveSettings={saveSettings}
-                    min={0}
-                    max={1}
-                    placeholder="0.8"
-                  />
-                </InputVertical>
-                <InputVertical
-                  title="Leaf Confidence"
-                  subDescription="Optional threshold for third-level leaf matches."
-                  withLabel
-                >
-                  <NumericSettingField
-                    name="taxonomy_search_leaf_confidence_threshold"
-                    value={s.taxonomy_search_leaf_confidence_threshold}
-                    saveSettings={saveSettings}
-                    min={0}
-                    max={1}
-                    nullable
-                    placeholder="Use default"
-                  />
-                </InputVertical>
-                <InputVertical
-                  title="L2 Confidence"
-                  subDescription="Optional threshold for second-level matches."
-                  withLabel
-                >
-                  <NumericSettingField
-                    name="taxonomy_search_l2_confidence_threshold"
-                    value={s.taxonomy_search_l2_confidence_threshold}
-                    saveSettings={saveSettings}
-                    min={0}
-                    max={1}
-                    nullable
-                    placeholder="Use default"
-                  />
-                </InputVertical>
-                <InputVertical
-                  title="L1 Confidence"
-                  subDescription="Optional threshold for first-level matches."
-                  withLabel
-                >
-                  <NumericSettingField
-                    name="taxonomy_search_l1_confidence_threshold"
-                    value={s.taxonomy_search_l1_confidence_threshold}
-                    saveSettings={saveSettings}
-                    min={0}
-                    max={1}
-                    nullable
-                    placeholder="Use default"
-                  />
-                </InputVertical>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <InputVertical
-                  title="Minimum Filtered Results"
-                  subDescription="Soft filtering falls back when fewer chunks are returned."
-                  withLabel
-                >
-                  <NumericSettingField
-                    name="taxonomy_search_min_results_for_filtered_search"
-                    value={
-                      s.taxonomy_search_min_results_for_filtered_search ?? 5
-                    }
-                    saveSettings={saveSettings}
-                    min={0}
-                    integer
-                    placeholder="5"
-                  />
-                </InputVertical>
-                <InputVertical
-                  title="Max Leaf Expansion"
-                  subDescription="Prevents broad L1/L2 matches from becoming hard filters."
-                  withLabel
-                >
-                  <NumericSettingField
-                    name="taxonomy_search_max_leaf_expansion_count"
-                    value={s.taxonomy_search_max_leaf_expansion_count ?? 100}
-                    saveSettings={saveSettings}
-                    min={1}
-                    integer
-                    placeholder="100"
-                  />
-                </InputVertical>
-                <InputVertical
-                  title="Match Timeout"
-                  subDescription="Taxonomy matching time budget in milliseconds."
-                  suffix="(ms)"
-                  withLabel
-                >
-                  <NumericSettingField
-                    name="taxonomy_search_timeout_ms"
-                    value={s.taxonomy_search_timeout_ms ?? 100}
-                    saveSettings={saveSettings}
-                    min={1}
-                    integer
-                    placeholder="100"
-                  />
-                </InputVertical>
-                <InputVertical
-                  title="Required Coverage"
-                  subDescription="Optional minimum labeled document coverage before filtering."
-                  suffix="(%)"
-                  withLabel
-                >
-                  <NumericSettingField
-                    name="taxonomy_search_require_coverage_percent"
-                    value={s.taxonomy_search_require_coverage_percent}
-                    saveSettings={saveSettings}
-                    min={0}
-                    max={100}
-                    nullable
-                    placeholder="No threshold"
-                  />
-                </InputVertical>
-              </div>
-
-              <Section gap={0.5}>
-                <InputHorizontal
-                  title="Hierarchy Fallback"
-                  description="If a leaf match is too weak, allow matching at L2 or L1."
-                  withLabel
-                >
-                  <Switch
-                    checked={
-                      s.taxonomy_search_enable_hierarchy_fallback ?? true
-                    }
-                    onCheckedChange={(checked) => {
-                      void saveSettings({
-                        taxonomy_search_enable_hierarchy_fallback: checked,
-                      });
-                    }}
-                  />
-                </InputHorizontal>
-                <InputHorizontal
-                  title="Allow L2 Hard Filter"
-                  description="Permit second-level matches to become hard filters."
-                  withLabel
-                >
-                  <Switch
-                    checked={s.taxonomy_search_allow_l2_hard_filter ?? false}
-                    onCheckedChange={(checked) => {
-                      void saveSettings({
-                        taxonomy_search_allow_l2_hard_filter: checked,
-                      });
-                    }}
-                  />
-                </InputHorizontal>
-                <InputHorizontal
-                  title="Allow L1 Hard Filter"
-                  description="Permit first-level matches to become hard filters."
-                  withLabel
-                >
-                  <Switch
-                    checked={s.taxonomy_search_allow_l1_hard_filter ?? false}
-                    onCheckedChange={(checked) => {
-                      void saveSettings({
-                        taxonomy_search_allow_l1_hard_filter: checked,
-                      });
-                    }}
-                  />
-                </InputHorizontal>
-                <InputHorizontal
-                  title="Require Confirmed Version"
-                  description="Only use active taxonomy versions for automatic filtering."
-                  withLabel
-                >
-                  <Switch
-                    checked={
-                      s.taxonomy_search_require_version_confirmed ?? true
-                    }
-                    onCheckedChange={(checked) => {
-                      void saveSettings({
-                        taxonomy_search_require_version_confirmed: checked,
-                      });
-                    }}
-                  />
-                </InputHorizontal>
-                <InputHorizontal
-                  title="Exclude Low Confidence Assignments"
-                  description="Avoid using low-confidence document labels as retrieval filters."
-                  withLabel
-                >
-                  <Switch
-                    checked={
-                      s.taxonomy_search_exclude_low_confidence_assignments ??
-                      true
-                    }
-                    onCheckedChange={(checked) => {
-                      void saveSettings({
-                        taxonomy_search_exclude_low_confidence_assignments:
-                          checked,
-                      });
-                    }}
-                  />
-                </InputHorizontal>
-              </Section>
+              </InputVertical>
             </Section>
           </Card>
 

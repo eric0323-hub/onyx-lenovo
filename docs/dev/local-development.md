@@ -164,10 +164,11 @@ LANGFUSE_MINIO_CONSOLE_HOST_PORT=19091
 
 ## 启动开发环境
 
-本地开发固定拆成三部分启动，不再同时维护完整 Docker、Docker 后端、本机后端等多套路径：
+本地开发固定拆成四部分启动，不再同时维护完整 Docker、Docker 后端、本机后端等多套路径：
 
-- Docker：只跑 Onyx 依赖服务和 Langfuse，不跑 Onyx 的 API/Web/background。
+- Docker：默认只跑 Onyx 依赖服务和 Langfuse，不跑 Onyx 的 API/Web。
 - 后端：本机用 `uv` 启动 FastAPI，监听 `8080`。
+- 后台任务：本机用 `uv` 启动 Celery workers，消费 Redis 里的异步任务。
 - 前端：本机用 `bun` 启动 Next.js，监听 `3000`，通过 `INTERNAL_URL` 连接本机后端。
 
 ### 1. 启动其他 Docker 服务和 Langfuse
@@ -197,6 +198,21 @@ cd deployment/docker_compose
 COMPOSE_PROFILES=s3-filestore,code-interpreter docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d \
   relational_db cache opensearch inference_model_server indexing_model_server minio code-interpreter
 ```
+
+这条命令只启动基础设施。它不会启动 Onyx 的 Celery workers。文章上传后的解析、summary 生成、
+基于 summary 的 taxonomy tagging、connector indexing、用户文件处理等异步流程，都需要后台任务服务。
+
+本地开发推荐在宿主机启动 Celery workers，见下面的“启动本机后台任务”。如果只是临时验证完整异步链路，
+也可以把 Docker 的 `background` 服务加到命令里：
+
+```bash
+cd deployment/docker_compose
+COMPOSE_PROFILES=s3-filestore,code-interpreter docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d \
+  relational_db cache opensearch inference_model_server indexing_model_server minio code-interpreter background
+```
+
+不要同时运行 Docker `background` 和本机 Celery workers，除非你明确知道它们会共同消费同一个 Redis broker。
+否则同一类任务可能被不同代码版本的 worker 消费，调试结果会变得不确定。
 
 启动 Langfuse Docker 服务：
 
@@ -267,7 +283,34 @@ http://127.0.0.1:8080
 如果修改了 `.vscode/.env` 里的 `LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY` 或 `LANGFUSE_HOST`，必须重启
 本机后端，tracing processor 才会重新初始化。
 
-### 3. 启动本机前端
+### 3. 启动本机后台任务
+
+本机后端只处理同步 API 请求。凡是通过 Celery 投递的任务，都需要后台 worker 常驻运行。
+
+```bash
+cd backend
+uv run python -m dotenv -f ../.vscode/.env run -- python scripts/dev_run_background_jobs.py
+```
+
+这个脚本会启动 primary、light、docprocessing、docfetching、heavy、monitoring、user file processing、
+scheduled tasks 和 beat。`heavy` worker 包含 `taxonomy_processing` 队列，文章导入完整链路依赖它：
+
+```text
+upload API -> file_record -> taxonomy_processing task -> document -> summary -> taxonomy tags -> document tags projection
+```
+
+如果你只启动了 Docker 基础设施和本机 8080/3000，文章导入接口仍会返回 `queued`，但任务会停在 Redis broker
+里，后续不会生成 `document`、`document_taxonomy_summary`、`document_taxonomy_tag` 或投影到 `document__tag`。
+
+检查 taxonomy 导入队列是否堆积：
+
+```bash
+docker exec onyx-cache-1 redis-cli -n 15 llen taxonomy_processing:1
+```
+
+返回非 `0` 通常表示没有 worker 正在消费高优先级 taxonomy 任务，或 worker 启动失败。
+
+### 4. 启动本机前端
 
 确认 `web/.env.local` 指向本机后端：
 
@@ -407,6 +450,61 @@ POSTGRES_HOST_PORT=15433
 ### 修改 Celery worker 后没有生效
 
 Celery worker 没有自动热重载。修改 worker 代码后，需要重启对应 Celery worker 或相关容器。
+
+### 文章导入一直显示 35%
+
+文章导入页的 35% 表示 dashboard 里这篇文档还没有 `complete` 状态的
+`document_taxonomy_summary`。常见原因有两个：
+
+- 没有启动 Celery worker，`taxonomy_processing` 队列无人消费。
+- worker 已消费任务，但索引或 embedding 阶段失败，还没走到 summary 初始化。
+
+先查 Redis 队列：
+
+```bash
+docker exec onyx-cache-1 redis-cli -n 15 llen taxonomy_processing:1
+```
+
+再查文章链路是否写完整：
+
+```bash
+docker exec onyx-relational_db-1 psql -U postgres -A -F $'\t' -P pager=off -c "
+select d.id, d.semantic_id, d.chunk_count, s.status as summary_status, s.failure_reason
+from document d
+left join document_taxonomy_summary s on s.document_id = d.id
+where d.id = '<DOCUMENT_ID>';
+"
+
+docker exec onyx-relational_db-1 psql -U postgres -A -F $'\t' -P pager=off -c "
+select count(*) as taxonomy_tags
+from document_taxonomy_tag
+where document_id = '<DOCUMENT_ID>';
+"
+```
+
+如果 `document` 已存在但 `chunk_count = 0`、summary 行为空，同时 model server 日志里有
+`PermissionError at /app/.cache/huggingface/.../refs/main`，通常是本地 Docker/Podman 的 named volume
+保留了旧的 SELinux/MCS label。`docker-compose.dev.yml` 已对两个 model server 的 HuggingFace cache
+挂载加了 `:Z` relabel，本地需要重建 model server 容器让挂载重新生效：
+
+```bash
+cd deployment/docker_compose
+COMPOSE_PROFILES=s3-filestore,code-interpreter docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d \
+  --force-recreate inference_model_server indexing_model_server
+```
+
+如果仍然报同样的 permission 错误，说明缓存 volume 内已有文件 label 无法被当前挂载修正。可以删除两个模型缓存
+volume 后重建，代价是模型会重新下载：
+
+```bash
+cd deployment/docker_compose
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml stop inference_model_server indexing_model_server
+docker volume rm onyx_model_cache_huggingface onyx_indexing_huggingface_model_cache
+COMPOSE_PROFILES=s3-filestore,code-interpreter docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d \
+  inference_model_server indexing_model_server
+```
+
+模型服务修复后，重新上传文章或重新投递导入任务。已经失败且队列为空的旧任务不会自动恢复。
 
 ### OpenSearch SSL EOF
 

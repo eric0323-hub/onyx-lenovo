@@ -1,5 +1,9 @@
 import subprocess
+import sys
 import threading
+
+
+CELERY_CMD = [sys.executable, "-m", "celery"]
 
 
 def monitor_process(process_name: str, process: subprocess.Popen) -> None:
@@ -17,7 +21,7 @@ def monitor_process(process_name: str, process: subprocess.Popen) -> None:
 
 def run_jobs() -> None:
     cmd_worker_primary = [
-        "celery",
+        *CELERY_CMD,
         "-A",
         "onyx.background.celery.versioned_apps.primary",
         "worker",
@@ -31,7 +35,7 @@ def run_jobs() -> None:
     ]
 
     cmd_worker_light = [
-        "celery",
+        *CELERY_CMD,
         "-A",
         "onyx.background.celery.versioned_apps.light",
         "worker",
@@ -45,7 +49,7 @@ def run_jobs() -> None:
     ]
 
     cmd_worker_docprocessing = [
-        "celery",
+        *CELERY_CMD,
         "-A",
         "onyx.background.celery.versioned_apps.docprocessing",
         "worker",
@@ -58,7 +62,7 @@ def run_jobs() -> None:
     ]
 
     cmd_worker_docfetching = [
-        "celery",
+        *CELERY_CMD,
         "-A",
         "onyx.background.celery.versioned_apps.docfetching",
         "worker",
@@ -71,7 +75,7 @@ def run_jobs() -> None:
     ]
 
     cmd_worker_heavy = [
-        "celery",
+        *CELERY_CMD,
         "-A",
         "onyx.background.celery.versioned_apps.heavy",
         "worker",
@@ -81,11 +85,11 @@ def run_jobs() -> None:
         "--loglevel=INFO",
         "--hostname=heavy@%n",
         "-Q",
-        "connector_pruning,connector_doc_permissions_sync,connector_external_group_sync,csv_generation,sandbox",
+        "connector_pruning,connector_doc_permissions_sync,connector_external_group_sync,csv_generation,taxonomy_processing,sandbox",
     ]
 
     cmd_worker_monitoring = [
-        "celery",
+        *CELERY_CMD,
         "-A",
         "onyx.background.celery.versioned_apps.monitoring",
         "worker",
@@ -99,7 +103,7 @@ def run_jobs() -> None:
     ]
 
     cmd_worker_user_file_processing = [
-        "celery",
+        *CELERY_CMD,
         "-A",
         "onyx.background.celery.versioned_apps.user_file_processing",
         "worker",
@@ -113,7 +117,7 @@ def run_jobs() -> None:
     ]
 
     cmd_worker_scheduled_tasks = [
-        "celery",
+        *CELERY_CMD,
         "-A",
         "onyx.background.celery.versioned_apps.scheduled_tasks",
         "worker",
@@ -127,7 +131,7 @@ def run_jobs() -> None:
     ]
 
     cmd_beat = [
-        "celery",
+        *CELERY_CMD,
         "-A",
         "onyx.background.celery.versioned_apps.beat",
         "beat",

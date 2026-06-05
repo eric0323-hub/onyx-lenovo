@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Tree from "rc-tree";
 import type { TreeNodeProps, TreeProps } from "rc-tree";
 import useSWR from "swr";
+import { useRouter } from "next/navigation";
+import type { Route } from "next";
 import { Hoverable } from "@opal/core";
 import { errorHandlingFetcher } from "@/lib/fetcher";
 import { SWR_KEYS } from "@/lib/swr-keys";
@@ -22,8 +24,6 @@ import {
   Divider,
   EmptyMessageCard,
   MessageCard,
-  Popover,
-  PopoverMenu,
   Tag,
   Text,
 } from "@opal/components";
@@ -41,7 +41,6 @@ import {
   SvgEdit,
   SvgFileText,
   SvgLoader,
-  SvgMoreHorizontal,
   SvgPlus,
   SvgRefreshCw,
   SvgSearch,
@@ -52,7 +51,6 @@ import {
 } from "@opal/icons";
 import type { IconProps } from "@opal/types";
 import { toast } from "@/hooks/useToast";
-import LineItem from "@/refresh-components/buttons/LineItem";
 import {
   activateTaxonomyVersion,
   createTaxonomyDraft,
@@ -277,6 +275,36 @@ function getLatestImportTask(tasks?: TaxonomyTaggingTask[]) {
 
 function getVersionChangeReason(version: TaxonomyVersion) {
   return version.change_reason?.trim() || null;
+}
+
+function getVersionStatusLabel(status: TaxonomyVersion["status"]) {
+  switch (status) {
+    case "active":
+      return "生效中";
+    case "draft":
+      return "草稿";
+    case "superseded":
+      return "已替换";
+    case "deprecated":
+      return "已废弃";
+    default:
+      return status;
+  }
+}
+
+function getVersionSourceLabel(source: TaxonomyVersion["source"]) {
+  switch (source) {
+    case "ai_generated":
+      return "AI 生成";
+    case "default_template":
+      return "默认模板";
+    case "manual":
+      return "手动维护";
+    case "tagging_optimization":
+      return "打标优化";
+    default:
+      return source;
+  }
 }
 
 function getVersionHistoryDescription(version: TaxonomyVersion) {
@@ -524,12 +552,18 @@ function TaxonomyPageLayout({
   route,
   description,
   rightChildren,
+  backButton,
+  backButtonLabel,
+  onBack,
   width = "lg",
   children,
 }: {
   route: AdminRouteEntry;
   description: string;
   rightChildren?: ReactNode;
+  backButton?: boolean;
+  backButtonLabel?: string;
+  onBack?: () => void;
   width?: "lg" | "full";
   children: ReactNode;
 }) {
@@ -540,6 +574,9 @@ function TaxonomyPageLayout({
         title={route.title}
         description={description}
         rightChildren={rightChildren}
+        backButton={backButton}
+        backButtonLabel={backButtonLabel}
+        onBack={onBack}
         divider
       />
       <SettingsLayouts.Body>{children}</SettingsLayouts.Body>
@@ -1781,7 +1818,7 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
               autoResize
               placeholder="例如：我们是一家制造业企业，知识库包含制度流程、质量管理、设备运维、售后维修、产品手册和安全生产文档。重点关注一线员工查找制度、维修手册和质量问题复盘的场景。"
             />
-            <div className="flex items-end [&_.interactive-container]:h-12 md:[&_.interactive-container]:h-16">
+            <div className="flex items-center justify-center [&_.interactive-container]:h-12 md:[&_.interactive-container]:h-16">
               <Button
                 icon={isGeneratingTaxonomy ? SpinningLoaderIcon : SvgSparkle}
                 prominence="primary"
@@ -2016,7 +2053,10 @@ function getSummaryStatusColor(status: DocumentTaxonomySummary["status"]) {
   return "blue" as const;
 }
 
-function ArticleProcessingSummary({
+const IMPORTED_ARTICLES_GRID_COLUMNS =
+  "3rem minmax(0,2fr) minmax(140px,0.65fr) 112px minmax(220px,0.9fr) minmax(160px,220px) 5rem";
+
+function ArticleProgressCell({
   summary,
 }: {
   summary: DocumentTaxonomySummary;
@@ -2024,9 +2064,9 @@ function ArticleProcessingSummary({
   const stage = getArticleStage(summary);
 
   return (
-    <div className="border-t border-border-01 pt-1.5">
-      <div className="grid w-fit max-w-full grid-cols-[minmax(170px,auto)_minmax(220px,360px)_2.75rem] items-center gap-3">
-        <div className="flex min-w-0 items-center gap-2">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
+      <div className="min-w-0">
+        <div className="mb-1 flex min-w-0 items-center gap-1.5">
           <Tag title={stage.title} color={stage.color} />
           <Text as="p" font="secondary-body" color="text-03" maxLines={1}>
             {stage.description}
@@ -2041,55 +2081,25 @@ function ArticleProcessingSummary({
             style={{ width: `${stage.progress}%` }}
           />
         </div>
-        <Text font="main-ui-action" color="text-05" nowrap>
-          {`${stage.progress}%`}
-        </Text>
       </div>
+      <Text font="main-ui-action" color="text-05" nowrap>
+        {`${stage.progress}%`}
+      </Text>
     </div>
   );
 }
 
 function ArticleSummaryStatus({
   summary,
-  onEditSummary,
 }: {
   summary: DocumentTaxonomySummary;
-  onEditSummary: (summary: DocumentTaxonomySummary) => void;
 }) {
   return (
-    <div className="flex min-w-0 items-center justify-between gap-1.5">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <Tag
-          title={getSummaryStatusLabel(summary.status)}
-          color={getSummaryStatusColor(summary.status)}
-        />
-        <Text font="secondary-body" color="text-03" maxLines={1}>
-          {summary.is_manual ? "人工" : "AI"}
-        </Text>
-      </div>
-      <Popover>
-        <Popover.Trigger asChild>
-          <Button
-            icon={SvgMoreHorizontal}
-            prominence="tertiary"
-            size="sm"
-            tooltip="Summary 操作"
-          />
-        </Popover.Trigger>
-        <Popover.Content side="bottom" align="end" width="sm">
-          <PopoverMenu>
-            {[
-              <LineItem
-                key="edit-summary"
-                icon={SvgEdit}
-                onClick={() => onEditSummary(summary)}
-              >
-                查看 / 编辑 Summary
-              </LineItem>,
-            ]}
-          </PopoverMenu>
-        </Popover.Content>
-      </Popover>
+    <div className="flex min-w-0 items-center">
+      <Tag
+        title={getSummaryStatusLabel(summary.status)}
+        color={getSummaryStatusColor(summary.status)}
+      />
     </div>
   );
 }
@@ -2118,10 +2128,76 @@ function ArticleTimeCell({ summary }: { summary: DocumentTaxonomySummary }) {
   );
 }
 
-function ArticleTagsCell({ tags }: { tags: DocumentTaxonomyTag[] }) {
+function CompactArticleTag({ tag }: { tag: DocumentTaxonomyTag }) {
+  const title = `${tag.full_path_snapshot} · ${(tag.confidence * 100).toFixed(0)}%`;
+  const colorClass =
+    tag.review_status === "confirmed"
+      ? "bg-theme-green-01 text-theme-green-05"
+      : "bg-theme-blue-01 text-theme-blue-05";
+
   return (
-    <div className="flex min-w-0 justify-center">
-      <ArticleTagList tags={tags} maxVisible={1} />
+    <div
+      className={`flex h-4 max-w-[10.5rem] min-w-0 items-center overflow-hidden rounded-04 px-1 ${colorClass}`}
+      title={title}
+    >
+      <Text as="p" font="figure-small-value" color="inherit" maxLines={1}>
+        {title}
+      </Text>
+    </div>
+  );
+}
+
+function CompactHiddenTagCount({ count }: { count: number }) {
+  return (
+    <div className="flex h-4 shrink-0 items-center rounded-04 bg-background-tint-02 px-1">
+      <Text as="p" font="figure-small-value" color="text-03" nowrap>
+        {`+${count}`}
+      </Text>
+    </div>
+  );
+}
+
+function ArticleTagsCell({ tags }: { tags: DocumentTaxonomyTag[] }) {
+  const activeTags = tags.filter((tag) => tag.status === "active");
+  const visibleTags = activeTags.slice(0, 1);
+  const hiddenCount = activeTags.length - visibleTags.length;
+
+  if (!activeTags.length) {
+    return (
+      <div className="flex min-w-0 justify-center">
+        <Tag title="暂无标签" color="gray" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-w-0 items-center justify-center gap-1.5 overflow-hidden">
+      {visibleTags.map((tag) => (
+        <CompactArticleTag key={tag.id} tag={tag} />
+      ))}
+      {hiddenCount > 0 && <CompactHiddenTagCount count={hiddenCount} />}
+    </div>
+  );
+}
+
+function ArticleDetailCell({
+  summary,
+  onEditSummary,
+}: {
+  summary: DocumentTaxonomySummary;
+  onEditSummary: (summary: DocumentTaxonomySummary) => void;
+}) {
+  return (
+    <div className="flex min-w-0 justify-end">
+      <Button
+        icon={SvgEdit}
+        prominence="tertiary"
+        size="sm"
+        tooltip="查看并编辑 Summary"
+        onClick={() => onEditSummary(summary)}
+      >
+        详情
+      </Button>
     </div>
   );
 }
@@ -2167,6 +2243,7 @@ function SummaryEditorModal({
       setSaving(false);
     }
   };
+  const summaryHasChanges = summary != null && value !== lastSavedValue;
 
   return (
     <Modal open={!!summary} onOpenChange={(isOpen) => !isOpen && handleClose()}>
@@ -2256,7 +2333,7 @@ function SummaryEditorModal({
             icon={saving ? SpinningLoaderIcon : SvgCheck}
             prominence="primary"
             onClick={handleSave}
-            disabled={!summary || saving || value === lastSavedValue}
+            disabled={!summaryHasChanges || saving}
           >
             {saving ? "保存中" : "保存 Summary"}
           </Button>
@@ -2267,24 +2344,34 @@ function SummaryEditorModal({
 }
 
 function ImportedArticleRow({
+  articleNumber,
   summary,
   onEditSummary,
 }: {
+  articleNumber: number;
   summary: DocumentTaxonomySummary;
   onEditSummary: (summary: DocumentTaxonomySummary) => void;
 }) {
   const tags = useDocumentTaxonomyTags(summary.document_id);
 
   return (
-    <div className="flex flex-col gap-1.5 border-b border-border-01 px-4 py-2.5 last:border-b-0">
-      <div className="grid grid-cols-[minmax(0,2fr)_minmax(140px,0.75fr)_150px_minmax(180px,220px)] items-center gap-3">
+    <div className="border-b border-border-01 px-4 py-2.5 last:border-b-0">
+      <div
+        className="grid items-center gap-3"
+        style={{ gridTemplateColumns: IMPORTED_ARTICLES_GRID_COLUMNS }}
+      >
+        <div className="flex min-w-0 justify-center">
+          <Text as="p" font="main-ui-action" color="text-03" nowrap>
+            {String(articleNumber)}
+          </Text>
+        </div>
         <ArticleFileNameCell summary={summary} />
         <ArticleTimeCell summary={summary} />
-        <ArticleSummaryStatus summary={summary} onEditSummary={onEditSummary} />
+        <ArticleSummaryStatus summary={summary} />
+        <ArticleProgressCell summary={summary} />
         <ArticleTagsCell tags={tags} />
+        <ArticleDetailCell summary={summary} onEditSummary={onEditSummary} />
       </div>
-
-      <ArticleProcessingSummary summary={summary} />
     </div>
   );
 }
@@ -2350,7 +2437,15 @@ function ImportedArticlesList({
           <div className="border-b border-border-01 px-4 py-4">
             <ArticleListHeader count={summaries.length} />
           </div>
-          <div className="grid grid-cols-[minmax(0,2fr)_minmax(140px,0.75fr)_150px_minmax(180px,220px)] items-center gap-3 border-b border-border-01 bg-background-tint-01 px-4 py-2.5">
+          <div
+            className="grid items-center gap-3 border-b border-border-01 bg-background-tint-01 px-4 py-2.5"
+            style={{ gridTemplateColumns: IMPORTED_ARTICLES_GRID_COLUMNS }}
+          >
+            <div className="flex justify-center">
+              <Text font="figure-small-label" color="text-03">
+                序号
+              </Text>
+            </div>
             <Text font="figure-small-label" color="text-03">
               文件名
             </Text>
@@ -2360,15 +2455,24 @@ function ImportedArticlesList({
             <Text font="figure-small-label" color="text-03">
               Summary
             </Text>
+            <Text font="figure-small-label" color="text-03">
+              进度
+            </Text>
             <div className="flex justify-center">
               <Text font="figure-small-label" color="text-03">
                 标签
               </Text>
             </div>
+            <div className="flex justify-end">
+              <Text font="figure-small-label" color="text-03">
+                详情
+              </Text>
+            </div>
           </div>
-          {summaries.map((summary) => (
+          {summaries.map((summary, index) => (
             <ImportedArticleRow
               key={summary.document_id}
+              articleNumber={index + 1}
               summary={summary}
               onEditSummary={setEditingSummary}
             />
@@ -3043,98 +3147,155 @@ function ActiveTaxonomyPanel({
 }) {
   const activeVersion = dashboard?.taxonomy?.active_version;
   const activeCounts = activeVersion ? countNodes(activeVersion.nodes) : null;
+  const draftCount = versions.filter(
+    (version) => version.status === "draft"
+  ).length;
+  const historyDescription = versions.length
+    ? `${versions.length} 个版本 · ${draftCount} 个草稿待生效`
+    : "暂无版本历史";
+  const activeVersionSummary = activeVersion
+    ? `v${activeVersion.version_number} · ${activeCounts?.l1 ?? 0} 个一级 · ${activeCounts?.l2 ?? 0} 个二级 · ${activeCounts?.leaf ?? 0} 个三级`
+    : "创建并生效草稿后，将在这里展示标签树";
+  const healthSummary = activeVersion?.health_summary;
+  const duplicateNamesRaw = healthSummary?.["duplicate_names"];
+  const missingExampleNodesRaw = healthSummary?.["leaf_nodes_missing_examples"];
+  const duplicateNames = Array.isArray(duplicateNamesRaw)
+    ? duplicateNamesRaw.filter(
+        (item): item is string => typeof item === "string" && item.length > 0
+      )
+    : [];
+  const missingExampleNodes = Array.isArray(missingExampleNodesRaw)
+    ? missingExampleNodesRaw.filter(
+        (item): item is string => typeof item === "string" && item.length > 0
+      )
+    : [];
+  const healthIssueCount = duplicateNames.length + missingExampleNodes.length;
+  const healthIssueDescription = [
+    duplicateNames.length ? `${duplicateNames.length} 个重复名称` : null,
+    missingExampleNodes.length
+      ? `${missingExampleNodes.length} 个三级标签缺少示例`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <Section id="active-taxonomy" className="scroll-mt-24" gap={1}>
-      <div className="grid gap-3 md:grid-cols-3">
+    <Section
+      id="active-taxonomy"
+      className="scroll-mt-24"
+      alignItems="stretch"
+      justifyContent="start"
+      height="auto"
+      gap={1}
+    >
+      <div className="grid grid-cols-3 gap-3">
         <StatCard
-          title="Coverage"
+          title="覆盖率"
           value={`${dashboard?.coverage.coverage_percent?.toFixed(1) ?? "0.0"}%`}
-          detail={`${dashboard?.coverage.labeled_documents ?? 0}/${dashboard?.coverage.total_documents ?? 0} documents labeled`}
+          detail={`${dashboard?.coverage.labeled_documents ?? 0}/${dashboard?.coverage.total_documents ?? 0} 篇文章已打标`}
         />
         <StatCard
-          title="Active Version"
-          value={activeVersion ? `v${activeVersion.version_number}` : "None"}
+          title="当前版本"
+          value={activeVersion ? `v${activeVersion.version_number}` : "无"}
           detail={
             activeVersion
-              ? `${activeCounts?.leaf ?? 0} leaves · ${formatDate(activeVersion.effective_at)}`
-              : "Create and activate a draft to enable tagging"
+              ? `${activeCounts?.leaf ?? 0} 个三级标签 · ${formatDate(activeVersion.effective_at)}`
+              : "创建并启用草稿后开始打标"
           }
         />
         <StatCard
-          title="Versions"
+          title="版本总数"
           value={String(versions.length)}
-          detail={`${versions.filter((version) => version.status === "draft").length} drafts waiting`}
+          detail={`${draftCount} 个草稿待生效`}
         />
       </div>
 
-      <Card border="solid" rounding="lg">
-        <CardLayout.Header>
-          <div className="p-2">
-            <Content
-              icon={SvgBlocks}
-              title="当前生效版本"
-              description={
-                activeVersion
-                  ? dashboard?.taxonomy?.name || "Enterprise Knowledge Taxonomy"
-                  : "暂无生效标签体系版本"
-              }
-              sizePreset="main-ui"
-              variant="section"
-            />
-          </div>
-        </CardLayout.Header>
-        <Divider paddingParallel="fit" paddingPerpendicular="fit" />
-        {activeVersion ? (
-          <Section gap={0.75}>
-            {activeVersion.health_summary && (
-              <MessageCard
-                title="健康检查摘要"
-                description={JSON.stringify(activeVersion.health_summary)}
-                padding="xs"
+      <div className="grid grid-cols-[minmax(0,1fr)_21rem] items-start gap-4">
+        <Card border="solid" rounding="lg">
+          <CardLayout.Header>
+            <div className="p-2">
+              <Content
+                icon={SvgBlocks}
+                title="当前生效版本"
+                description={activeVersionSummary}
+                sizePreset="main-ui"
+                variant="section"
               />
-            )}
-            <TaxonomyTree nodes={activeVersion.nodes} />
-          </Section>
-        ) : (
-          <EmptyMessageCard sizePreset="main-ui" title="暂无生效版本" />
-        )}
-      </Card>
-
-      <Card border="solid" rounding="lg">
-        <CardLayout.Header>
-          <div className="p-2">
-            <Content
-              icon={SvgClock}
-              title="版本历史"
-              description="查看每次保存的版本、修改说明、来源和创建时间。草稿需要设为生效后才会用于打标和检索过滤。"
-              sizePreset="main-ui"
-              variant="section"
-            />
-          </div>
-        </CardLayout.Header>
-        <Divider paddingParallel="fit" paddingPerpendicular="fit" />
-        <Section gap={0.5}>
-          {versions.length ? (
-            versions.map((version) => (
-              <Card key={version.id} border="solid" rounding="md">
-                <InputHorizontal
-                  title={`v${version.version_number} · ${version.status}`}
-                  description={getVersionHistoryDescription(version)}
-                  withLabel
-                >
-                  <Tag
-                    title={version.source}
-                    color={version.status === "active" ? "green" : "gray"}
-                  />
-                </InputHorizontal>
-              </Card>
-            ))
+            </div>
+          </CardLayout.Header>
+          <Divider paddingParallel="fit" paddingPerpendicular="fit" />
+          {activeVersion ? (
+            <Section alignItems="stretch" height="auto" gap={0.75}>
+              {healthIssueCount > 0 && (
+                <MessageCard
+                  variant="warning"
+                  title="标签体系需要检查"
+                  description={healthIssueDescription}
+                  padding="xs"
+                />
+              )}
+              <TaxonomyTree nodes={activeVersion.nodes} />
+            </Section>
           ) : (
-            <EmptyMessageCard sizePreset="main-ui" title="暂无版本历史" />
+            <EmptyMessageCard sizePreset="main-ui" title="暂无生效版本" />
           )}
-        </Section>
-      </Card>
+        </Card>
+
+        <Card border="solid" rounding="lg">
+          <CardLayout.Header>
+            <div className="p-2">
+              <Content
+                icon={SvgClock}
+                title="版本历史"
+                description={historyDescription}
+                sizePreset="main-ui"
+                variant="section"
+              />
+            </div>
+          </CardLayout.Header>
+          <Divider paddingParallel="fit" paddingPerpendicular="fit" />
+          <Section alignItems="stretch" height="auto" gap={0.5}>
+            {versions.length ? (
+              versions.map((version) => (
+                <Card key={version.id} border="solid" rounding="md">
+                  <Section gap={0.5}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <Text font="main-ui-action" color="text-05">
+                          {`v${version.version_number}`}
+                        </Text>
+                        <Text
+                          as="p"
+                          font="secondary-body"
+                          color="text-03"
+                          maxLines={2}
+                        >
+                          {getVersionHistoryDescription(version)}
+                        </Text>
+                      </div>
+                      <Tag
+                        title={getVersionStatusLabel(version.status)}
+                        color={
+                          version.status === "active"
+                            ? "green"
+                            : version.status === "draft"
+                              ? "amber"
+                              : "gray"
+                        }
+                      />
+                    </div>
+                    <Text font="secondary-body" color="text-03">
+                      {getVersionSourceLabel(version.source)}
+                    </Text>
+                  </Section>
+                </Card>
+              ))
+            ) : (
+              <EmptyMessageCard sizePreset="main-ui" title="暂无版本历史" />
+            )}
+          </Section>
+        </Card>
+      </div>
     </Section>
   );
 }
@@ -3242,6 +3403,7 @@ export function TaxonomyImportsPage() {
 }
 
 export function TaxonomyHistoryPage() {
+  const router = useRouter();
   const dashboard = useTaxonomyDashboard();
   const versions = useTaxonomyVersions();
 
@@ -3249,8 +3411,18 @@ export function TaxonomyHistoryPage() {
     <TaxonomyPageLayout
       route={ADMIN_ROUTES.TAXONOMY_HISTORY}
       description="查看当前生效标签体系和所有草稿、生效、已替换版本的历史记录。"
+      backButton
+      backButtonLabel="返回标签体系"
+      onBack={() =>
+        router.push(ADMIN_ROUTES.TAXONOMY_TEMPLATE_DRAFT.path as Route)
+      }
+      width="full"
     >
-      <ActiveTaxonomyPanel dashboard={dashboard} versions={versions} />
+      <div className="flex w-full justify-center">
+        <div className="w-full max-w-[1200px]">
+          <ActiveTaxonomyPanel dashboard={dashboard} versions={versions} />
+        </div>
+      </div>
     </TaxonomyPageLayout>
   );
 }

@@ -22,6 +22,8 @@ import {
   Divider,
   EmptyMessageCard,
   MessageCard,
+  Popover,
+  PopoverMenu,
   Tag,
   Text,
 } from "@opal/components";
@@ -39,6 +41,7 @@ import {
   SvgEdit,
   SvgFileText,
   SvgLoader,
+  SvgMoreHorizontal,
   SvgPlus,
   SvgRefreshCw,
   SvgSearch,
@@ -49,6 +52,7 @@ import {
 } from "@opal/icons";
 import type { IconProps } from "@opal/types";
 import { toast } from "@/hooks/useToast";
+import LineItem from "@/refresh-components/buttons/LineItem";
 import {
   activateTaxonomyVersion,
   createTaxonomyDraft,
@@ -119,6 +123,8 @@ type TaxonomyNodeListField =
 
 const TAXONOMY_GENERATION_STORAGE_KEY =
   "onyx.taxonomy.templateDraft.generation.v1";
+const TAXONOMY_DASHBOARD_POLL_INTERVAL_MS = 3000;
+const TAXONOMY_IMPORT_POST_UPLOAD_POLL_MS = 60_000;
 
 function readPersistedTaxonomyGeneration(): PersistedTaxonomyGenerationState | null {
   if (typeof window === "undefined") {
@@ -246,6 +252,17 @@ function getTaskProgress(task?: TaxonomyTaggingTask) {
   );
 }
 
+function taxonomyTaskIsActive(task?: TaxonomyTaggingTask) {
+  return task?.status === "running" || task?.status === "pending";
+}
+
+function taxonomyDashboardHasActiveProcessing(dashboard?: TaxonomyDashboard) {
+  return Boolean(
+    dashboard?.summaries.some((summary) => summary.status === "pending") ||
+    dashboard?.recent_tasks.some(taxonomyTaskIsActive)
+  );
+}
+
 function getLatestImportTask(tasks?: TaxonomyTaggingTask[]) {
   return tasks?.find((task) =>
     [
@@ -281,10 +298,7 @@ function SpinningLoaderIcon(props: IconProps) {
   );
 }
 
-function getArticleStage(
-  summary: DocumentTaxonomySummary,
-  latestTask?: TaxonomyTaggingTask
-) {
+function getArticleStage(summary: DocumentTaxonomySummary) {
   if (summary.status === "failed") {
     return {
       title: "总结失败",
@@ -300,33 +314,6 @@ function getArticleStage(
       description: "大模型正在生成文章 Summary",
       progress: 35,
       color: "blue" as const,
-    };
-  }
-
-  if (latestTask?.status === "running" || latestTask?.status === "pending") {
-    return {
-      title: getTaskStatusLabel(latestTask.status),
-      description: `${latestTask.processed_docs}/${latestTask.total_docs} 篇已处理`,
-      progress: Math.max(55, getTaskProgress(latestTask)),
-      color: "blue" as const,
-    };
-  }
-
-  if (latestTask?.status === "failed") {
-    return {
-      title: "打标签失败",
-      description: latestTask.error_message || "需要重新运行打标签任务",
-      progress: getTaskProgress(latestTask),
-      color: "amber" as const,
-    };
-  }
-
-  if (latestTask?.status === "completed_with_errors") {
-    return {
-      title: "部分完成",
-      description: `${latestTask.failed_docs} 篇打标签失败`,
-      progress: getTaskProgress(latestTask),
-      color: "amber" as const,
     };
   }
 
@@ -348,7 +335,7 @@ function getArticleStage(
 }
 
 function getDocumentTitle(summary: DocumentTaxonomySummary) {
-  return summary.semantic_id || summary.document_id;
+  return summary.semantic_id?.trim() || "未命名文章";
 }
 
 function createEmptyTaxonomyNode(
@@ -536,18 +523,23 @@ function removeTaxonomyNodeAtPath(
 function TaxonomyPageLayout({
   route,
   description,
+  rightChildren,
+  width = "lg",
   children,
 }: {
   route: AdminRouteEntry;
   description: string;
+  rightChildren?: ReactNode;
+  width?: "lg" | "full";
   children: ReactNode;
 }) {
   return (
-    <SettingsLayouts.Root width="lg">
+    <SettingsLayouts.Root width={width}>
       <SettingsLayouts.Header
         icon={route.icon}
         title={route.title}
         description={description}
+        rightChildren={rightChildren}
         divider
       />
       <SettingsLayouts.Body>{children}</SettingsLayouts.Body>
@@ -555,10 +547,16 @@ function TaxonomyPageLayout({
   );
 }
 
-function useTaxonomyDashboard() {
+function useTaxonomyDashboard(shouldPoll = false) {
   const { data: dashboard } = useSWR<TaxonomyDashboard>(
     SWR_KEYS.taxonomyDashboard,
-    errorHandlingFetcher
+    errorHandlingFetcher,
+    {
+      refreshInterval: (latestData) =>
+        shouldPoll || taxonomyDashboardHasActiveProcessing(latestData)
+          ? TAXONOMY_DASHBOARD_POLL_INTERVAL_MS
+          : 0,
+    }
   );
   return dashboard;
 }
@@ -1985,7 +1983,7 @@ function ArticleTagList({ tags }: { tags: DocumentTaxonomyTag[] }) {
     return <Tag title="暂无标签" color="gray" />;
   }
 
-  const visibleTags = activeTags.slice(0, 3);
+  const visibleTags = activeTags.slice(0, 2);
   const hiddenCount = activeTags.length - visibleTags.length;
 
   return (
@@ -2002,86 +2000,386 @@ function ArticleTagList({ tags }: { tags: DocumentTaxonomyTag[] }) {
   );
 }
 
-function ArticleProcessingProgress({
+function getSummaryStatusColor(status: DocumentTaxonomySummary["status"]) {
+  if (status === "complete") {
+    return "green" as const;
+  }
+  if (status === "failed") {
+    return "amber" as const;
+  }
+  return "blue" as const;
+}
+
+function ArticleProcessingSummary({
   summary,
-  latestTask,
+  tags,
 }: {
   summary: DocumentTaxonomySummary;
-  latestTask?: TaxonomyTaggingTask;
+  tags: DocumentTaxonomyTag[];
 }) {
-  const stage = getArticleStage(summary, latestTask);
+  const stage = getArticleStage(summary);
 
   return (
-    <div className="flex min-w-[180px] flex-col gap-1">
-      <div className="flex items-center justify-between gap-2">
-        <Tag title={stage.title} color={stage.color} />
-        <Text font="secondary-body" color="text-03">
+    <div className="grid grid-cols-[minmax(0,2fr)_minmax(140px,1fr)_150px] items-center gap-3 border-t border-border-01 pt-1.5">
+      <div className="col-span-2 grid grid-cols-[minmax(170px,auto)_minmax(140px,1fr)_2.75rem] items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Tag title={stage.title} color={stage.color} />
+          <Text as="p" font="secondary-body" color="text-03" maxLines={1}>
+            {stage.description}
+          </Text>
+        </div>
+        <div
+          className="h-1.5 overflow-hidden rounded-full bg-background-tint-02"
+          aria-label={stage.title}
+        >
+          <div
+            className="h-full rounded-full bg-theme-blue-05 transition-all duration-300"
+            style={{ width: `${stage.progress}%` }}
+          />
+        </div>
+        <Text font="main-ui-action" color="text-05" nowrap>
           {`${stage.progress}%`}
         </Text>
       </div>
-      <div
-        className="h-1.5 overflow-hidden rounded-full bg-background-tint-02"
-        aria-label={stage.title}
-      >
-        <div
-          className="h-full rounded-full bg-text-05 transition-all"
-          style={{ width: `${stage.progress}%` }}
-        />
+
+      <div className="flex min-w-0 items-center justify-end gap-2">
+        <Text as="span" font="figure-small-label" color="text-03" nowrap>
+          标签
+        </Text>
+        <ArticleTagList tags={tags} />
       </div>
-      <Text as="p" font="secondary-body" color="text-03" maxLines={1}>
-        {stage.description}
+    </div>
+  );
+}
+
+function ArticleSummaryStatus({
+  summary,
+  onEditSummary,
+}: {
+  summary: DocumentTaxonomySummary;
+  onEditSummary: (summary: DocumentTaxonomySummary) => void;
+}) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-1.5">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <Tag
+          title={getSummaryStatusLabel(summary.status)}
+          color={getSummaryStatusColor(summary.status)}
+        />
+        <Text font="secondary-body" color="text-03" maxLines={1}>
+          {summary.is_manual ? "人工" : "AI"}
+        </Text>
+      </div>
+      <Popover>
+        <Popover.Trigger asChild>
+          <Button
+            icon={SvgMoreHorizontal}
+            prominence="tertiary"
+            size="sm"
+            tooltip="Summary 操作"
+          />
+        </Popover.Trigger>
+        <Popover.Content side="bottom" align="end" width="sm">
+          <PopoverMenu>
+            {[
+              <LineItem
+                key="edit-summary"
+                icon={SvgEdit}
+                onClick={() => onEditSummary(summary)}
+              >
+                查看 / 编辑 Summary
+              </LineItem>,
+            ]}
+          </PopoverMenu>
+        </Popover.Content>
+      </Popover>
+    </div>
+  );
+}
+
+function ArticleFileNameCell({
+  summary,
+}: {
+  summary: DocumentTaxonomySummary;
+}) {
+  return (
+    <div className="min-w-0">
+      <Text as="p" font="main-ui-action" color="text-05" maxLines={1}>
+        {getDocumentTitle(summary)}
       </Text>
     </div>
   );
 }
 
+function ArticleTimeCell({ summary }: { summary: DocumentTaxonomySummary }) {
+  return (
+    <div className="min-w-0">
+      <Text as="p" font="secondary-body" color="text-03" maxLines={1}>
+        {formatDate(summary.generated_at || summary.updated_at)}
+      </Text>
+    </div>
+  );
+}
+
+function SummaryEditorModal({
+  summary,
+  onClose,
+}: {
+  summary: DocumentTaxonomySummary | null;
+  onClose: () => void;
+}) {
+  const tags = useDocumentTaxonomyTags(summary?.document_id ?? "");
+  const [value, setValue] = useState(summary?.summary ?? "");
+  const [lastSavedValue, setLastSavedValue] = useState(summary?.summary ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const nextValue = summary?.summary ?? "";
+    setValue(nextValue);
+    setLastSavedValue(nextValue);
+  }, [summary?.document_id, summary?.summary]);
+
+  const handleClose = () => {
+    if (saving) {
+      return;
+    }
+    onClose();
+  };
+
+  const handleSave = async () => {
+    if (!summary) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await updateSummary(summary.document_id, value);
+      setLastSavedValue(value);
+      toast.success("Summary 已保存，正在自动重新打标签");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Summary 保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open={!!summary} onOpenChange={(isOpen) => !isOpen && handleClose()}>
+      <Modal.Content width="lg" height="lg" background="gray">
+        <Modal.Header
+          icon={SvgFileText}
+          title="编辑 Summary"
+          description={
+            summary
+              ? `${getDocumentTitle(summary)} · 保存后会自动重新打标签`
+              : "保存后会自动重新打标签"
+          }
+          onClose={handleClose}
+        />
+        <Modal.Body>
+          {summary && (
+            <Section gap={1} alignItems="stretch">
+              <Card border="solid" rounding="md" padding="md">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
+                  <div className="min-w-0">
+                    <Text font="main-ui-action" color="text-05" maxLines={2}>
+                      {getDocumentTitle(summary)}
+                    </Text>
+                    <Text
+                      as="p"
+                      font="secondary-body"
+                      color="text-03"
+                      maxLines={1}
+                    >
+                      {formatDate(summary.generated_at || summary.updated_at)}
+                    </Text>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <Tag
+                      title={getSummaryStatusLabel(summary.status)}
+                      color={getSummaryStatusColor(summary.status)}
+                    />
+                    <Tag
+                      title={summary.is_manual ? "人工摘要" : "AI 摘要"}
+                      color={summary.is_manual ? "purple" : "gray"}
+                    />
+                    <Tag
+                      title={summary.current_label_status || "标签待生成"}
+                      color="gray"
+                    />
+                  </div>
+                </div>
+              </Card>
+
+              <InputVertical title="Summary" withLabel>
+                <InputTextArea
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  rows={8}
+                  maxRows={16}
+                  autoResize
+                  placeholder="文章入库后会自动生成 Summary，可在这里手动修改。"
+                />
+              </InputVertical>
+
+              <Card
+                border="solid"
+                rounding="md"
+                padding="md"
+                background="light"
+              >
+                <div className="flex min-w-0 flex-col gap-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <Text font="main-ui-action" color="text-05">
+                      标签结果
+                    </Text>
+                    <Text font="secondary-body" color="text-03">
+                      {`${tags.filter((tag) => tag.status === "active").length} 个有效标签`}
+                    </Text>
+                  </div>
+                  <ArticleTagList tags={tags} />
+                </div>
+              </Card>
+            </Section>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button prominence="secondary" onClick={handleClose}>
+            关闭
+          </Button>
+          <Button
+            icon={saving ? SpinningLoaderIcon : SvgCheck}
+            prominence="primary"
+            onClick={handleSave}
+            disabled={!summary || saving || value === lastSavedValue}
+          >
+            {saving ? "保存中" : "保存 Summary"}
+          </Button>
+        </Modal.Footer>
+      </Modal.Content>
+    </Modal>
+  );
+}
+
 function ImportedArticleRow({
   summary,
-  latestTask,
+  onEditSummary,
 }: {
   summary: DocumentTaxonomySummary;
-  latestTask?: TaxonomyTaggingTask;
+  onEditSummary: (summary: DocumentTaxonomySummary) => void;
 }) {
   const tags = useDocumentTaxonomyTags(summary.document_id);
 
   return (
-    <Card border="solid" rounding="md">
-      <div className="grid gap-3 p-1 md:grid-cols-[minmax(0,1fr)_220px]">
-        <Section gap={0.5}>
-          <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
-              <Text font="main-ui-action" color="text-05" maxLines={1}>
-                {getDocumentTitle(summary)}
-              </Text>
-              <Text as="p" font="secondary-body" color="text-03" maxLines={1}>
-                {`${getSummaryStatusLabel(summary.status)} · ${summary.is_manual ? "人工摘要" : "AI 摘要"} · ${formatDate(summary.generated_at || summary.updated_at)}`}
-              </Text>
-            </div>
-            <Tag
-              title={summary.current_label_status || "标签待生成"}
-              color={
-                tags.some((tag) => tag.status === "active") ? "green" : "gray"
-              }
-            />
-          </div>
+    <div className="flex flex-col gap-1.5 border-b border-border-01 px-4 py-2.5 last:border-b-0">
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(140px,1fr)_150px] items-center gap-3">
+        <ArticleFileNameCell summary={summary} />
+        <ArticleTimeCell summary={summary} />
+        <ArticleSummaryStatus summary={summary} onEditSummary={onEditSummary} />
+      </div>
 
-          <SummaryEditor summary={summary} compact />
+      <ArticleProcessingSummary summary={summary} tags={tags} />
+    </div>
+  );
+}
 
-          <ArticleTagList tags={tags} />
-        </Section>
-
-        <ArticleProcessingProgress summary={summary} latestTask={latestTask} />
+function ArticleMetricCard({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+}) {
+  return (
+    <Card border="solid" rounding="lg" padding="lg">
+      <div className="flex min-w-0 flex-col gap-2">
+        <Text as="p" font="figure-small-label" color="text-03" nowrap>
+          {label}
+        </Text>
+        <Text as="p" font="heading-h3" color="text-05" maxLines={1}>
+          {value}
+        </Text>
+        {detail && (
+          <Text as="p" font="secondary-body" color="text-03" maxLines={2}>
+            {detail}
+          </Text>
+        )}
       </div>
     </Card>
+  );
+}
+
+function ArticleListHeader({ count }: { count: number }) {
+  return (
+    <div className="flex items-end justify-between gap-4">
+      <div className="min-w-0">
+        <Text as="h2" font="heading-h3" color="text-05">
+          文章列表 / 详情区
+        </Text>
+        <Text as="p" font="secondary-body" color="text-03">
+          查看每篇文章的处理进度、摘要状态与标签结果。
+        </Text>
+      </div>
+      <Text font="secondary-body" color="text-03">
+        {`${count} 篇文章`}
+      </Text>
+    </div>
+  );
+}
+
+function ImportedArticlesList({
+  summaries,
+}: {
+  summaries: DocumentTaxonomySummary[];
+}) {
+  const [editingSummary, setEditingSummary] =
+    useState<DocumentTaxonomySummary | null>(null);
+
+  return (
+    <>
+      <Card border="solid" rounding="lg" padding="fit">
+        <div className="flex min-w-0 flex-col">
+          <div className="border-b border-border-01 px-4 py-4">
+            <ArticleListHeader count={summaries.length} />
+          </div>
+          <div className="grid grid-cols-[minmax(0,2fr)_minmax(140px,1fr)_150px] items-center gap-3 border-b border-border-01 bg-background-tint-01 px-4 py-2.5">
+            <Text font="figure-small-label" color="text-03">
+              文件名
+            </Text>
+            <Text font="figure-small-label" color="text-03">
+              生成/更新时间
+            </Text>
+            <Text font="figure-small-label" color="text-03">
+              Summary
+            </Text>
+          </div>
+          {summaries.map((summary) => (
+            <ImportedArticleRow
+              key={summary.document_id}
+              summary={summary}
+              onEditSummary={setEditingSummary}
+            />
+          ))}
+        </div>
+      </Card>
+      <SummaryEditorModal
+        summary={editingSummary}
+        onClose={() => setEditingSummary(null)}
+      />
+    </>
   );
 }
 
 function ImportArticlesModal({
   open,
   onClose,
+  onImportQueued,
 }: {
   open: boolean;
   onClose: () => void;
+  onImportQueued: () => void;
 }) {
   const [files, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -2116,7 +2414,9 @@ function ImportArticlesModal({
     try {
       const result = await importArticles(files);
       if (result.imported.length) {
-        toast.success(`已导入 ${result.imported.length} 篇文章`);
+        toast.success(`已上传 ${result.imported.length} 个文件`, {
+          description: "后台会继续完成解析、Summary 和打标签。",
+        });
       }
       if (result.failed.length) {
         toast.error(`${result.failed.length} 个文件导入失败`, {
@@ -2127,6 +2427,7 @@ function ImportArticlesModal({
       }
       if (result.imported.length) {
         reset();
+        onImportQueued();
         onClose();
       }
     } catch (error) {
@@ -2195,7 +2496,7 @@ function ImportArticlesModal({
             onClick={handleSubmit}
             disabled={submitting || !files.length}
           >
-            {submitting ? "导入中" : "开始导入"}
+            {submitting ? "上传中" : "上传并处理"}
           </Button>
         </Modal.Footer>
       </Modal.Content>
@@ -2205,102 +2506,84 @@ function ImportArticlesModal({
 
 function ImportedArticlesPanel({
   dashboard,
+  queuedImportActive,
 }: {
   dashboard?: TaxonomyDashboard;
+  queuedImportActive: boolean;
 }) {
-  const [importModalOpen, setImportModalOpen] = useState(false);
   const latestTask = getLatestImportTask(dashboard?.recent_tasks);
   const summaries = dashboard?.summaries ?? [];
   const hasActiveTaxonomy = Boolean(dashboard?.taxonomy?.active_version_id);
-  const activeTask =
-    latestTask?.status === "running" || latestTask?.status === "pending"
-      ? latestTask
-      : undefined;
-  const handleImportArticles = () => {
-    if (!dashboard) {
-      toast.error("正在加载标签体系状态，请稍后再试");
-      return;
-    }
-    if (!hasActiveTaxonomy) {
-      toast.error("请先创建并生效标签体系，再导入文章");
-      return;
-    }
-    setImportModalOpen(true);
-  };
+  const activeTask = taxonomyTaskIsActive(latestTask) ? latestTask : undefined;
+  const totalDocuments = dashboard?.coverage.total_documents ?? 0;
+  const labeledDocuments = dashboard?.coverage.labeled_documents ?? 0;
+  const coveragePercent =
+    dashboard?.coverage.coverage_percent?.toFixed(1) ?? "0.0";
+  let importStatusTitle = "空闲";
+  if (queuedImportActive) {
+    importStatusTitle = "后台接收中";
+  }
+  if (activeTask) {
+    importStatusTitle = `${getTaskStatusLabel(activeTask.status)} ${activeTask.processed_docs}/${activeTask.total_docs}`;
+  }
 
   return (
-    <Section id="imported-articles" className="scroll-mt-24" gap={1}>
-      <Card border="solid" rounding="lg">
-        <CardLayout.Header>
-          <div className="grid gap-3 p-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-            <div className="min-w-0">
-              <Content
-                icon={SvgFileText}
-                title="文章管理"
-                description={`${dashboard?.coverage.total_documents ?? 0} 篇 · 已打标签 ${dashboard?.coverage.labeled_documents ?? 0} · 覆盖率 ${dashboard?.coverage.coverage_percent?.toFixed(1) ?? "0.0"}% · Summary 保存后自动重新打标签`}
-                sizePreset="main-ui"
-                variant="section"
-              />
-            </div>
-            <div className="flex flex-wrap items-center justify-start gap-1.5 md:justify-end">
-              <Button
-                icon={SvgPlus}
-                prominence="primary"
-                onClick={handleImportArticles}
-              >
-                导入文章
-              </Button>
-              <Tag
-                title={
-                  activeTask
-                    ? `${getTaskStatusLabel(activeTask.status)} ${activeTask.processed_docs}/${activeTask.total_docs}`
-                    : "空闲"
-                }
-                color={activeTask ? "blue" : "gray"}
-              />
-              {!hasActiveTaxonomy && (
-                <Tag title="需先启用标签体系" color="amber" />
-              )}
-            </div>
-          </div>
-        </CardLayout.Header>
-        <Divider paddingParallel="fit" paddingPerpendicular="fit" />
-        <Section gap={0.75} alignItems="stretch" justifyContent="start">
-          {summaries.length ? (
-            <Section gap={0.5}>
-              {summaries.map((summary) => (
-                <ImportedArticleRow
-                  key={summary.document_id}
-                  summary={summary}
-                  latestTask={latestTask}
-                />
-              ))}
-            </Section>
-          ) : (
-            <ImportedArticlesEmptyState />
-          )}
-        </Section>
-      </Card>
-      <ImportArticlesModal
-        open={importModalOpen}
-        onClose={() => setImportModalOpen(false)}
-      />
+    <Section id="imported-articles" gap={2} alignItems="stretch">
+      <div className="grid w-full grid-cols-4 gap-4">
+        <ArticleMetricCard
+          label="入库文章"
+          value={`${totalDocuments} 篇`}
+          detail="当前可处理文章"
+        />
+        <ArticleMetricCard
+          label="已打标签"
+          value={`${labeledDocuments} 篇`}
+          detail="含有效标签结果"
+        />
+        <ArticleMetricCard
+          label="覆盖率"
+          value={`${coveragePercent}%`}
+          detail="已打标签 / 入库文章"
+        />
+        <ArticleMetricCard
+          label="处理状态"
+          value={importStatusTitle}
+          detail={hasActiveTaxonomy ? "可继续导入文章" : "需启用标签体系"}
+        />
+      </div>
+
+      {summaries.length ? (
+        <ImportedArticlesList summaries={summaries} />
+      ) : (
+        <ImportedArticlesEmptyState queued={queuedImportActive} />
+      )}
     </Section>
   );
 }
 
-function ImportedArticlesEmptyState() {
+function ImportedArticlesEmptyState({ queued = false }: { queued?: boolean }) {
+  const description = queued
+    ? "上传完成后会在这里显示处理进度"
+    : "导入 Markdown 或 PDF 后会在这里查看 Summary 和标签";
+
   return (
-    <div className="flex justify-center px-2 pb-5 pt-7">
-      <Content
-        icon={SvgFileText}
-        title="暂无导入文章"
-        sizePreset="secondary"
-        variant="body"
-        color="muted"
-        width="fit"
-      />
-    </div>
+    <Card border="dashed" rounding="md" padding="lg" background="light">
+      <div className="flex justify-center">
+        <div className="flex max-w-md flex-col items-center gap-2 text-center">
+          <Content
+            icon={SvgFileText}
+            title={queued ? "后台正在接收文章" : "暂无导入文章"}
+            sizePreset="secondary"
+            variant="body"
+            color="muted"
+            width="fit"
+          />
+          <Text as="p" font="secondary-body" color="text-03" maxLines={2}>
+            {description}
+          </Text>
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -2863,14 +3146,86 @@ export function TaxonomyTemplateDraftPage() {
 }
 
 export function TaxonomyImportsPage() {
-  const dashboard = useTaxonomyDashboard();
+  const [queuedPollUntil, setQueuedPollUntil] = useState<number | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const queuedPollActive =
+    queuedPollUntil !== null && Date.now() < queuedPollUntil;
+  const dashboard = useTaxonomyDashboard(queuedPollActive);
+  const hasActiveTaxonomy = Boolean(dashboard?.taxonomy?.active_version_id);
+  const latestTask = getLatestImportTask(dashboard?.recent_tasks);
+  const activeTask = taxonomyTaskIsActive(latestTask) ? latestTask : undefined;
+  let importStatusTitle = "空闲";
+  if (queuedPollActive) {
+    importStatusTitle = "后台接收中";
+  }
+  if (activeTask) {
+    importStatusTitle = `${getTaskStatusLabel(activeTask.status)} ${activeTask.processed_docs}/${activeTask.total_docs}`;
+  }
+
+  useEffect(() => {
+    if (!queuedPollUntil) {
+      return;
+    }
+    if (
+      Date.now() >= queuedPollUntil ||
+      taxonomyDashboardHasActiveProcessing(dashboard)
+    ) {
+      setQueuedPollUntil(null);
+    }
+  }, [dashboard, queuedPollUntil]);
+
+  const handleImportQueued = useCallback(() => {
+    setQueuedPollUntil(Date.now() + TAXONOMY_IMPORT_POST_UPLOAD_POLL_MS);
+  }, []);
+
+  const handleImportArticles = () => {
+    if (!dashboard) {
+      toast.error("正在加载标签体系状态，请稍后再试");
+      return;
+    }
+    if (!hasActiveTaxonomy) {
+      toast.error("请先创建并生效标签体系，再导入文章");
+      return;
+    }
+    setImportModalOpen(true);
+  };
 
   return (
     <TaxonomyPageLayout
       route={ADMIN_ROUTES.TAXONOMY_IMPORTS}
-      description="管理已入库文章、查看自动 Summary 与自动打标签结果，并支持手动修改 Summary。"
+      description="集中管理入库文章，跟踪 Summary 生成、标签处理与覆盖情况。"
+      width="full"
+      rightChildren={
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <Button
+            icon={SvgPlus}
+            prominence="primary"
+            size="lg"
+            onClick={handleImportArticles}
+          >
+            导入文章
+          </Button>
+          <Tag
+            title={importStatusTitle}
+            color={activeTask || queuedPollActive ? "blue" : "gray"}
+          />
+          {!hasActiveTaxonomy && <Tag title="需先启用标签体系" color="amber" />}
+        </div>
+      }
     >
-      <ImportedArticlesPanel dashboard={dashboard} />
+      <div className="flex w-full justify-center">
+        <div className="w-full max-w-[1200px]">
+          <ImportedArticlesPanel
+            dashboard={dashboard}
+            queuedImportActive={queuedPollActive}
+          />
+        </div>
+      </div>
+      <ImportArticlesModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onImportQueued={handleImportQueued}
+      />
     </TaxonomyPageLayout>
   );
 }

@@ -52,6 +52,10 @@ export type TaxonomyAssignmentStatus =
   | "needs_review"
   | "needs_retag"
   | "depends_on_disabled_label";
+export type TaxonomyArticleLabelStatus = Exclude<
+  TaxonomyAssignmentStatus,
+  "stale"
+>;
 
 export interface TaxonomyNode {
   id?: string | null;
@@ -111,6 +115,26 @@ export interface TaxonomyDraftStreamEvent {
   progress?: number | null;
 }
 
+export interface TaxonomyGenerationConfig {
+  first_level_candidate_multiplier: number;
+  first_level_max_count: number;
+  third_level_candidate_multiplier: number;
+  third_level_max_count: number;
+  third_level_parallelism: number;
+  l1_l2_prompt_template: string;
+  leaf_prompt_template: string;
+}
+
+export interface TaxonomyGenerationRuntimeConfig {
+  first_level_candidate_multiplier: number;
+  first_level_max_count: number;
+  third_level_candidate_multiplier: number;
+  third_level_max_count: number;
+  third_level_parallelism: number;
+  l1_l2_system_prompt: string;
+  leaf_system_prompt: string;
+}
+
 export interface Taxonomy {
   id: number;
   name: string;
@@ -137,7 +161,7 @@ export interface DocumentTaxonomySummary {
   failure_reason?: string | null;
   generated_at?: string | null;
   updated_at: string;
-  current_label_status?: string | null;
+  current_label_status?: TaxonomyArticleLabelStatus | null;
 }
 
 export interface ArticleImportItem {

@@ -9,7 +9,11 @@ from onyx.configs.constants import FileOrigin
 from onyx.configs.constants import OnyxCeleryPriority
 from onyx.configs.constants import OnyxCeleryQueues
 from onyx.configs.constants import OnyxCeleryTask
+from onyx.db import taxonomy_generation_config
 from onyx.server.taxonomy import api
+from onyx.taxonomy.models import GenerateTaxonomyDraftRequest
+from onyx.taxonomy.models import TaxonomyGenerationConfig
+from onyx.taxonomy.models import TaxonomyGenerationRuntimeConfig
 
 
 class _FakeFileStore:
@@ -31,6 +35,23 @@ class _FakeFileStore:
 
 class _FakeUser:
     id = UUID("00000000-0000-0000-0000-000000000001")
+
+
+class _FakeKvStore:
+    def __init__(self, stored: dict[str, object] | None = None) -> None:
+        self.stored = stored or {}
+
+    def load(
+        self,
+        _key: str,
+        refresh_cache: bool = False,
+    ) -> dict[str, object]:
+        _ = refresh_cache
+        return self.stored
+
+    def store(self, _key: str, val: object, encrypt: bool = False) -> None:
+        _ = encrypt
+        self.stored = val
 
 
 def _upload_file(name: str, content_type: str = "text/markdown") -> UploadFile:
@@ -78,3 +99,84 @@ def test_import_articles_enqueues_background_processing(
             },
         )
     ]
+
+
+def test_generation_config_api_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    saved_configs: list[TaxonomyGenerationConfig] = []
+    config = TaxonomyGenerationConfig(
+        first_level_candidate_multiplier=5,
+        first_level_max_count=24,
+        third_level_candidate_multiplier=3,
+        third_level_max_count=7,
+        third_level_parallelism=8,
+        l1_l2_prompt_template="自定义一级二级模板 {{x}} {{y}}",
+        leaf_prompt_template="自定义三级模板 {{m}} {{n}}",
+    )
+
+    monkeypatch.setattr(api, "get_taxonomy_generation_config", lambda: config)
+    monkeypatch.setattr(
+        api,
+        "set_taxonomy_generation_config",
+        lambda request: saved_configs.append(request) or request,
+    )
+
+    assert api.get_generation_config() == config
+    assert api.update_generation_config(config) == config
+    assert saved_configs == [config]
+
+
+def test_generation_config_migrates_legacy_system_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy_prompt = "旧版单提示词"
+    monkeypatch.setattr(
+        taxonomy_generation_config,
+        "get_kv_store",
+        lambda: _FakeKvStore({"system_prompt": legacy_prompt}),
+    )
+
+    config = taxonomy_generation_config.get_taxonomy_generation_config()
+
+    assert config.l1_l2_prompt_template == legacy_prompt
+    assert config.leaf_prompt_template == legacy_prompt
+
+
+def test_generate_draft_prefers_request_generation_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored_config = TaxonomyGenerationConfig(
+        first_level_candidate_multiplier=2,
+        first_level_max_count=10,
+        third_level_candidate_multiplier=2,
+        third_level_max_count=4,
+        third_level_parallelism=3,
+        l1_l2_prompt_template="后端保存的一级二级模板",
+        leaf_prompt_template="后端保存的三级模板",
+    )
+    request_config = TaxonomyGenerationRuntimeConfig(
+        first_level_candidate_multiplier=5,
+        first_level_max_count=24,
+        third_level_candidate_multiplier=3,
+        third_level_max_count=7,
+        third_level_parallelism=8,
+        l1_l2_system_prompt="前端渲染后的一级二级提示词",
+        leaf_system_prompt="前端渲染后的三级提示词",
+    )
+    used_configs: list[TaxonomyGenerationRuntimeConfig | None] = []
+
+    monkeypatch.setattr(api, "get_taxonomy_generation_config", lambda: stored_config)
+    monkeypatch.setattr(
+        api,
+        "generate_taxonomy_draft",
+        lambda **kwargs: used_configs.append(kwargs["generation_config"]) or [],
+    )
+
+    response = api.generate_draft(
+        GenerateTaxonomyDraftRequest(
+            company_description="业务背景",
+            generation_config=request_config,
+        )
+    )
+
+    assert response.nodes == []
+    assert used_configs == [request_config]

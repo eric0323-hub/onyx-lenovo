@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from onyx.error_handling.exceptions import OnyxError
+from onyx.main import get_application
 from onyx.server.manage.observability import api
 from onyx.tracing.framework import set_trace_processors
 from onyx.tracing.framework.processor_interface import TracingProcessor
@@ -37,6 +38,14 @@ class RecordingTracingProcessor(TracingProcessor):
 
     def force_flush(self) -> None:
         self.flush_count += 1
+
+
+def test_observability_router_is_registered() -> None:
+    application = get_application()
+    paths = {getattr(route, "path", "") for route in application.routes}
+
+    assert "/admin/observability/langfuse/status" in paths
+    assert "/admin/observability/langfuse/sample-traces" in paths
 
 
 def test_get_langfuse_status_uses_distinct_ui_host() -> None:

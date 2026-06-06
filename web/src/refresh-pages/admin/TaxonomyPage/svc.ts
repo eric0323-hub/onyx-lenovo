@@ -4,6 +4,8 @@ import {
   ArticleImportResponse,
   DocumentTaxonomyTag,
   TaxonomyDraftStreamEvent,
+  TaxonomyGenerationConfig,
+  TaxonomyGenerationRuntimeConfig,
   TaxonomyNode,
   TaxonomySearchApplyTo,
   TaxonomySearchDecision,
@@ -29,11 +31,34 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return parseResponse<T>(response);
 }
 
+async function putJson<T>(url: string, body: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return parseResponse<T>(response);
+}
+
 export async function refreshTaxonomyData() {
   await Promise.all([
     mutate(SWR_KEYS.taxonomyDashboard),
     mutate(SWR_KEYS.taxonomyVersions),
   ]);
+}
+
+export async function fetchTaxonomyGenerationConfig(): Promise<TaxonomyGenerationConfig> {
+  const response = await fetch("/api/admin/taxonomy/generation-config");
+  return parseResponse<TaxonomyGenerationConfig>(response);
+}
+
+export async function updateTaxonomyGenerationConfig(
+  config: TaxonomyGenerationConfig
+): Promise<TaxonomyGenerationConfig> {
+  return putJson<TaxonomyGenerationConfig>(
+    "/api/admin/taxonomy/generation-config",
+    config
+  );
 }
 
 export async function generateTaxonomyDraft(args: {
@@ -42,6 +67,7 @@ export async function generateTaxonomyDraft(args: {
   knowledge_scope?: string | null;
   classification_preferences?: string | null;
   max_leaf_nodes?: number;
+  generation_config?: TaxonomyGenerationRuntimeConfig | null;
 }): Promise<TaxonomyNode[]> {
   const response = await postJson<{ nodes: TaxonomyNode[] }>(
     "/api/admin/taxonomy/generate-draft",
@@ -58,6 +84,7 @@ export async function generateTaxonomyDraftStream(
     classification_preferences?: string | null;
     max_leaf_nodes?: number;
     parallelism?: number;
+    generation_config?: TaxonomyGenerationRuntimeConfig | null;
   },
   onEvent: (event: TaxonomyDraftStreamEvent) => void
 ): Promise<TaxonomyNode[]> {

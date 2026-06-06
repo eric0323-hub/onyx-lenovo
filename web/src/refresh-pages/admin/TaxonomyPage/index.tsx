@@ -2,6 +2,12 @@
 
 import type { ChangeEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import CodeMirror from "@uiw/react-codemirror";
+import { json, jsonParseLinter } from "@codemirror/lang-json";
+import { linter, lintGutter } from "@codemirror/lint";
+import type { Extension } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import Tree from "rc-tree";
 import type { TreeNodeProps, TreeProps } from "rc-tree";
 import useSWR from "swr";
@@ -18,6 +24,7 @@ import InputTextArea from "@/refresh-components/inputs/InputTextArea";
 import InputSelect from "@/refresh-components/inputs/InputSelect";
 import Switch from "@/refresh-components/inputs/Switch";
 import Modal from "@/refresh-components/Modal";
+import Tabs from "@/refresh-components/Tabs";
 import {
   Button,
   Card,
@@ -35,6 +42,8 @@ import {
 } from "@opal/layouts";
 import {
   SvgBlocks,
+  SvgBracketCurly,
+  SvgBranch,
   SvgCheck,
   SvgChevronRight,
   SvgClock,
@@ -42,12 +51,15 @@ import {
   SvgFileText,
   SvgLoader,
   SvgPlus,
+  SvgProgressBars,
   SvgRefreshCw,
   SvgSearch,
+  SvgSettings,
   SvgSparkle,
   SvgTag,
   SvgTrash,
   SvgUploadCloud,
+  SvgX,
 } from "@opal/icons";
 import type { IconProps } from "@opal/types";
 import { toast } from "@/hooks/useToast";
@@ -55,11 +67,13 @@ import {
   activateTaxonomyVersion,
   createTaxonomyDraft,
   fetchDocumentTaxonomyTags,
+  fetchTaxonomyGenerationConfig,
   generateSummaries,
   generateTaxonomyDraftStream,
   importArticles,
   matchTaxonomyQuery,
   runTagging,
+  updateTaxonomyGenerationConfig,
   updateSummary,
 } from "./svc";
 import {
@@ -67,6 +81,8 @@ import {
   DocumentTaxonomySummary,
   TaxonomyDashboard,
   TaxonomyDraftStreamEvent,
+  TaxonomyGenerationConfig,
+  TaxonomyGenerationRuntimeConfig,
   TaxonomyNode,
   TaxonomySearchApplyTo,
   TaxonomySearchDecision,
@@ -114,6 +130,13 @@ interface PersistedTaxonomyGenerationState {
   nodes: TaxonomyNode[];
 }
 
+interface ArticleStage {
+  title: string;
+  description: string;
+  progress: number;
+  color: "amber" | "blue" | "green" | "gray";
+}
+
 type TaxonomyNodeListField =
   | "positive_examples"
   | "negative_examples"
@@ -123,6 +146,82 @@ type TaxonomyNodeListField =
 const TAXONOMY_GENERATION_STORAGE_KEY =
   "onyx.taxonomy.templateDraft.generation.v1";
 const TAXONOMY_DASHBOARD_POLL_INTERVAL_MS = 3000;
+const DEFAULT_TAXONOMY_GENERATION_CONFIG: TaxonomyGenerationConfig = {
+  first_level_candidate_multiplier: 4,
+  first_level_max_count: 20,
+  third_level_candidate_multiplier: 4,
+  third_level_max_count: 6,
+  third_level_parallelism: 10,
+  l1_l2_prompt_template: "",
+  leaf_prompt_template: "",
+};
+
+function getTaxonomyGenerationCountMetrics(config: TaxonomyGenerationConfig) {
+  return {
+    firstStageInitialCount:
+      config.first_level_candidate_multiplier * config.first_level_max_count,
+    thirdStageInitialCount:
+      config.third_level_candidate_multiplier * config.third_level_max_count,
+  };
+}
+
+function getTaxonomyGenerationPromptVariables({
+  config,
+  companyDescription,
+}: {
+  config: TaxonomyGenerationConfig;
+  companyDescription: string;
+}) {
+  const metrics = getTaxonomyGenerationCountMetrics(config);
+  return {
+    company_description: companyDescription,
+    x: String(config.first_level_candidate_multiplier),
+    y: String(config.first_level_max_count),
+    xy: String(metrics.firstStageInitialCount),
+    m: String(config.third_level_candidate_multiplier),
+    n: String(config.third_level_max_count),
+    mn: String(metrics.thirdStageInitialCount),
+    p: String(config.third_level_parallelism),
+  };
+}
+
+function renderTaxonomyGenerationPromptTemplate(
+  template: string,
+  variables: Record<string, string>
+) {
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
+    return variables[key] ?? match;
+  });
+}
+
+function buildTaxonomyGenerationRequestConfig({
+  config,
+  companyDescription,
+}: {
+  config: TaxonomyGenerationConfig;
+  companyDescription: string;
+}): TaxonomyGenerationRuntimeConfig {
+  const variables = getTaxonomyGenerationPromptVariables({
+    config,
+    companyDescription,
+  });
+
+  return {
+    first_level_candidate_multiplier: config.first_level_candidate_multiplier,
+    first_level_max_count: config.first_level_max_count,
+    third_level_candidate_multiplier: config.third_level_candidate_multiplier,
+    third_level_max_count: config.third_level_max_count,
+    third_level_parallelism: config.third_level_parallelism,
+    l1_l2_system_prompt: renderTaxonomyGenerationPromptTemplate(
+      config.l1_l2_prompt_template.trim(),
+      variables
+    ),
+    leaf_system_prompt: renderTaxonomyGenerationPromptTemplate(
+      config.leaf_prompt_template.trim(),
+      variables
+    ),
+  };
+}
 
 function readPersistedTaxonomyGeneration(): PersistedTaxonomyGenerationState | null {
   if (typeof window === "undefined") {
@@ -326,7 +425,45 @@ function SpinningLoaderIcon(props: IconProps) {
   );
 }
 
-function getArticleStage(summary: DocumentTaxonomySummary) {
+function getArticleLabelStatusLabel(
+  status: DocumentTaxonomySummary["current_label_status"]
+) {
+  switch (status) {
+    case "active":
+      return "已打标签";
+    case "needs_review":
+      return "待复核";
+    case "needs_retag":
+      return "需重新打标";
+    case "depends_on_disabled_label":
+      return "标签不可用";
+    case null:
+    case undefined:
+      return "标签待生成";
+    default:
+      return status;
+  }
+}
+
+function getArticleProgressBarClass(color: ArticleStage["color"]) {
+  switch (color) {
+    case "green":
+      return "bg-theme-green-05";
+    case "amber":
+      return "bg-theme-yellow-05";
+    case "gray":
+      return "bg-background-tint-05";
+    case "blue":
+      return "bg-theme-blue-05";
+    default:
+      return "bg-theme-blue-05";
+  }
+}
+
+function getArticleStage(
+  summary: DocumentTaxonomySummary,
+  options: { hasActiveTaggingTask?: boolean } = {}
+): ArticleStage {
   if (summary.status === "failed") {
     return {
       title: "总结失败",
@@ -345,12 +482,53 @@ function getArticleStage(summary: DocumentTaxonomySummary) {
     };
   }
 
-  if (summary.current_label_status) {
+  switch (summary.current_label_status) {
+    case "active":
+      return {
+        title: getArticleLabelStatusLabel(summary.current_label_status),
+        description: "文章摘要和标签已生成",
+        progress: 100,
+        color: "green" as const,
+      };
+    case "needs_review":
+      return {
+        title: getArticleLabelStatusLabel(summary.current_label_status),
+        description: "标签已生成，需要人工复核",
+        progress: 100,
+        color: "amber" as const,
+      };
+    case "needs_retag":
+      return {
+        title: getArticleLabelStatusLabel(summary.current_label_status),
+        description: "摘要已生成，标签需要重新生成",
+        progress: 85,
+        color: "amber" as const,
+      };
+    case "depends_on_disabled_label":
+      return {
+        title: getArticleLabelStatusLabel(summary.current_label_status),
+        description: "当前标签依赖已停用节点",
+        progress: 85,
+        color: "amber" as const,
+      };
+    case null:
+    case undefined:
+      break;
+    default:
+      return {
+        title: summary.current_label_status,
+        description: "文章摘要和标签状态已更新",
+        progress: 100,
+        color: "green" as const,
+      };
+  }
+
+  if (!options.hasActiveTaggingTask) {
     return {
-      title: "已打标签",
-      description: "文章摘要和标签已生成",
+      title: "未匹配标签",
+      description: "摘要已生成，未匹配到可用标签",
       progress: 100,
-      color: "green" as const,
+      color: "gray" as const,
     };
   }
 
@@ -359,6 +537,21 @@ function getArticleStage(summary: DocumentTaxonomySummary) {
     description: "摘要已生成，等待标签任务处理",
     progress: 65,
     color: "gray" as const,
+  };
+}
+
+function getArticleLabelStatusTag(summary: DocumentTaxonomySummary) {
+  if (summary.status !== "complete") {
+    return {
+      title: getArticleLabelStatusLabel(summary.current_label_status),
+      color: "gray" as const,
+    };
+  }
+
+  const stage = getArticleStage(summary);
+  return {
+    title: stage.title,
+    color: stage.color,
   };
 }
 
@@ -604,6 +797,14 @@ function useTaxonomyVersions() {
     errorHandlingFetcher
   );
   return versions;
+}
+
+function useTaxonomyGenerationConfig() {
+  const { data, mutate: mutateConfig } = useSWR<TaxonomyGenerationConfig>(
+    SWR_KEYS.taxonomyGenerationConfig,
+    fetchTaxonomyGenerationConfig
+  );
+  return { config: data, mutateConfig };
 }
 
 function useDocumentTaxonomyTags(documentId: string) {
@@ -942,6 +1143,105 @@ function TaxonomyTree({
             onRequestRemove={onRequestRemove}
           />
         )}
+      />
+    </div>
+  );
+}
+
+const taxonomyJsonEditorTheme = EditorView.theme({
+  "&": {
+    backgroundColor: "var(--background-neutral-00)",
+    color: "var(--text-04)",
+    fontSize: "0.875rem",
+  },
+  ".cm-scroller": {
+    fontFamily:
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    lineHeight: "1.55",
+  },
+  ".cm-content": {
+    padding: "0.75rem 0",
+  },
+  ".cm-line": {
+    padding: "0 0.75rem",
+  },
+  ".cm-gutters": {
+    backgroundColor: "var(--background-tint-01)",
+    borderRight: "1px solid var(--border-02)",
+    color: "var(--text-03)",
+  },
+  ".cm-activeLine": {
+    backgroundColor: "var(--background-tint-01)",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "var(--background-tint-02)",
+  },
+  ".cm-selectionBackground": {
+    backgroundColor: "var(--highlight-selection) !important",
+  },
+  ".cm-focused": {
+    outline: "none",
+  },
+  ".cm-tooltip": {
+    backgroundColor: "var(--background-tint-00)",
+    border: "1px solid var(--border-02)",
+    borderRadius: "0.5rem",
+    boxShadow: "var(--shadow-lg)",
+    color: "var(--text-04)",
+  },
+});
+
+const taxonomyJsonEditorExtensions: Extension[] = [
+  json(),
+  linter(jsonParseLinter(), { delay: 250 }),
+  lintGutter(),
+  taxonomyJsonEditorTheme,
+];
+
+function TaxonomyJsonEditor({
+  value,
+  error,
+  onChange,
+}: {
+  value: string;
+  error: string | null;
+  onChange: (value: string) => void;
+}) {
+  const lineCount = value.split("\n").length;
+
+  return (
+    <div className="w-full overflow-hidden rounded-12 border border-border-02 bg-background-neutral-00">
+      <div className="flex items-center justify-between gap-3 border-b border-border-02 bg-background-tint-01 px-3 py-2">
+        <div className="flex items-center gap-2">
+          <Tag
+            title={error ? "JSON 需要修正" : "JSON 有效"}
+            color={error ? "amber" : "green"}
+            size="sm"
+          />
+          <Text font="secondary-body" color="text-03">
+            {`${lineCount} 行`}
+          </Text>
+        </div>
+      </div>
+      <CodeMirror
+        data-testid="taxonomy-json-editor"
+        value={value}
+        width="100%"
+        minHeight="36rem"
+        maxHeight="54rem"
+        basicSetup={{
+          bracketMatching: true,
+          closeBrackets: true,
+          foldGutter: true,
+          highlightActiveLine: true,
+          highlightActiveLineGutter: true,
+          lineNumbers: true,
+          syntaxHighlighting: true,
+        }}
+        extensions={taxonomyJsonEditorExtensions}
+        indentWithTab
+        onChange={onChange}
+        theme="light"
       />
     </div>
   );
@@ -1489,7 +1789,9 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [generationStatus, setGenerationStatus] =
     useState<TaxonomyGenerationStatus | null>(null);
+  const [generationConfigOpen, setGenerationConfigOpen] = useState(false);
   const hasRestoredGenerationRef = useRef(false);
+  const { config: generationConfig } = useTaxonomyGenerationConfig();
 
   const latestVersion =
     [pendingVersion, ...versions]
@@ -1502,6 +1804,13 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
   const nodeCounts = countNodes(taxonomyNodes);
   const canSave = taxonomyNodes.length > 0 && taxonomyJson.trim().length > 0;
   const isGeneratingTaxonomy = busyAction === "generate";
+  const generationProgress = Math.min(
+    100,
+    Math.max(0, generationStatus?.progress ?? 0)
+  );
+  const generationStatusMessage =
+    generationStatus?.message ||
+    "正在生成三级标签体系，内容会流式填入下方编辑区。";
 
   useEffect(() => {
     if (!latestVersion || latestVersion.nodes.length === 0) {
@@ -1533,6 +1842,7 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
   const runTaxonomyGeneration = useCallback(
     async ({
       prompt,
+      config,
       initialNodes = [],
       initialStatus = {
         message: "正在启动标签体系生成",
@@ -1541,6 +1851,7 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
       restored = false,
     }: {
       prompt: string;
+      config: TaxonomyGenerationConfig;
       initialNodes?: TaxonomyNode[];
       initialStatus?: TaxonomyGenerationStatus;
       restored?: boolean;
@@ -1575,7 +1886,11 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
             organization_context: null,
             knowledge_scope: null,
             classification_preferences: null,
-            parallelism: 10,
+            generation_config: buildTaxonomyGenerationRequestConfig({
+              config,
+              companyDescription: trimmedPrompt,
+            }),
+            parallelism: config.third_level_parallelism,
           },
           (event: TaxonomyDraftStreamEvent) => {
             const nextStatus = {
@@ -1622,15 +1937,20 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
     if (hasRestoredGenerationRef.current) {
       return;
     }
-    hasRestoredGenerationRef.current = true;
 
     const persistedGeneration = readPersistedTaxonomyGeneration();
     if (!persistedGeneration) {
+      hasRestoredGenerationRef.current = true;
       return;
     }
+    if (!generationConfig) {
+      return;
+    }
+    hasRestoredGenerationRef.current = true;
 
     void runTaxonomyGeneration({
       prompt: persistedGeneration.prompt,
+      config: generationConfig,
       initialNodes: persistedGeneration.nodes,
       initialStatus: {
         message: persistedGeneration.status.message || "正在恢复标签体系生成",
@@ -1638,16 +1958,29 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
       },
       restored: true,
     });
-  }, [runTaxonomyGeneration]);
+  }, [generationConfig, runTaxonomyGeneration]);
 
   const handleGenerate = async () => {
-    await runTaxonomyGeneration({ prompt: generationPrompt });
+    if (!generationConfig) {
+      toast.error("生成参数仍在加载，请稍后再试");
+      return;
+    }
+    await runTaxonomyGeneration({
+      prompt: generationPrompt,
+      config: generationConfig,
+    });
   };
 
-  const handleApplyJson = () => {
+  const syncTaxonomyJsonToTree = (
+    nextJson: string,
+    options: { showToast?: boolean } = {}
+  ) => {
+    setTaxonomyJson(nextJson);
+    setHasLocalTaxonomyChanges(true);
+
     try {
       const nodes = normalizeTaxonomyNodes(
-        parseTaxonomyNodesJson(taxonomyJson)
+        parseTaxonomyNodesJson(nextJson)
       );
       const validationMessage = getTaxonomyValidationMessage(
         validateTaxonomyNodes(nodes)
@@ -1655,15 +1988,33 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
       if (validationMessage) {
         throw new Error(validationMessage);
       }
-      applyNodes(nodes);
-      setEditorView("tree");
-      toast.success("已应用 JSON 编辑内容");
+      setTaxonomyNodes(nodes);
+      setJsonError(null);
+      setHydratedVersionId(null);
+      return true;
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "JSON 内容不完整";
       setJsonError(message);
-      toast.error(message);
+      if (options.showToast) {
+        toast.error(message);
+      }
+      return false;
     }
+  };
+
+  const handleOpenAddRootNode = () => {
+    if (
+      editorView === "json" &&
+      !syncTaxonomyJsonToTree(taxonomyJson, { showToast: true })
+    ) {
+      return;
+    }
+    setEditorView("tree");
+    setAddNodeTarget({
+      parentPath: [],
+      level: "l1",
+    });
   };
 
   const handleOpenAddChildNode = (path: number[], parentNode: TaxonomyNode) => {
@@ -1688,6 +2039,19 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
     );
     if (validationMessage) {
       toast.error(validationMessage);
+      return;
+    }
+
+    if (!addNodeTarget.parentNode) {
+      applyNodes([
+        ...taxonomyNodes,
+        {
+          ...normalizeTaxonomyNode(node),
+          sort_order: taxonomyNodes.length,
+        },
+      ]);
+      setEditorView("tree");
+      setAddNodeTarget(null);
       return;
     }
 
@@ -1795,36 +2159,62 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
   };
 
   return (
-    <Section id="taxonomy-builder" className="scroll-mt-24" gap={1}>
-      <Card border="solid" rounding="lg">
+    <Section
+      id="taxonomy-builder"
+      className="scroll-mt-24"
+      gap={1}
+      height="fit"
+      justifyContent="start"
+    >
+      <Card border="solid" rounding="lg" padding="fit">
         <CardLayout.Header>
-          <div className="p-2">
+          <div className="flex w-full items-center justify-between gap-3 px-4 py-3">
             <Content
               icon={SvgSparkle}
-              title="提示词生成"
+              title="标签生成"
+              description="输入业务背景后生成三级标签体系，可在生成前调整参数。"
               sizePreset="main-ui"
               variant="section"
             />
+            <div className="[&_.interactive-container]:px-2!">
+              <Button
+                icon={SvgSettings}
+                prominence="tertiary"
+                size="sm"
+                tooltip="调整生成参数"
+                onClick={() => setGenerationConfigOpen(true)}
+              >
+                参数
+              </Button>
+            </div>
           </div>
         </CardLayout.Header>
         <Divider paddingParallel="fit" paddingPerpendicular="fit" />
-        <Section className="p-2" gap={0.75} alignItems="stretch">
-          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_7rem] md:items-stretch">
+        <Section
+          className="px-4 pb-4 pt-4"
+          gap={0.75}
+          alignItems="stretch"
+          height="fit"
+          justifyContent="start"
+        >
+          <div className="w-full rounded-12 border border-border-01 bg-background-neutral-00 p-3 transition-colors focus-within:border-border-05 focus-within:shadow-[inset_0_0_0_2px_var(--background-tint-04)]">
             <InputTextArea
+              variant="internal"
               value={generationPrompt}
               onChange={(e) => setGenerationPrompt(e.target.value)}
               rows={4}
-              maxRows={8}
+              maxRows={7}
               autoResize
+              resizable={false}
+              className="min-h-[5.75rem] min-w-0 bg-transparent p-0 [&_textarea]:!font-main-ui-muted [&_textarea]:leading-5 [&_textarea::placeholder]:!font-main-ui-muted"
               placeholder="例如：我们是一家制造业企业，知识库包含制度流程、质量管理、设备运维、售后维修、产品手册和安全生产文档。重点关注一线员工查找制度、维修手册和质量问题复盘的场景。"
             />
-            <div className="flex items-center justify-center [&_.interactive-container]:h-12 md:[&_.interactive-container]:h-16">
+            <div className="mt-3 flex items-center justify-end [&_.interactive-container]:h-10! [&_.interactive-container]:min-w-[6.5rem]! [&_.interactive-container]:rounded-12! [&_.interactive-container]:px-3!">
               <Button
                 icon={isGeneratingTaxonomy ? SpinningLoaderIcon : SvgSparkle}
                 prominence="primary"
                 onClick={handleGenerate}
-                disabled={isGeneratingTaxonomy}
-                width="full"
+                disabled={isGeneratingTaxonomy || !generationConfig}
               >
                 {isGeneratingTaxonomy ? "生成中" : "生成"}
               </Button>
@@ -1832,22 +2222,32 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
           </div>
           {isGeneratingTaxonomy && (
             <div
-              className="flex flex-wrap items-center gap-2 text-status-info-05"
+              className="rounded-12 border border-border-01 bg-background-tint-01 px-3 py-2"
               aria-live="polite"
               role="status"
             >
-              <SvgLoader className="size-4 shrink-0 animate-spin" />
-              <Text as="p" font="secondary-body" color="inherit">
-                {generationStatus?.message ||
-                  "正在生成三级标签体系，内容会流式填入下方编辑区。"}
-              </Text>
-              {generationStatus?.progress != null && (
-                <Tag
-                  title={`${generationStatus.progress}%`}
-                  color="blue"
-                  size="sm"
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <div className="flex size-6 shrink-0 items-center justify-center rounded-08 border border-border-01 bg-background-neutral-00">
+                    <SvgLoader className="size-3.5 animate-spin text-text-03" />
+                  </div>
+                  <Text as="p" font="secondary-body" color="text-04" maxLines={1}>
+                    {generationStatusMessage}
+                  </Text>
+                </div>
+                <Text font="secondary-mono-label" color="text-03" nowrap>
+                  {`${generationProgress}%`}
+                </Text>
+              </div>
+              <div
+                className="mt-2 h-1 overflow-hidden rounded-full bg-background-tint-03"
+                aria-hidden
+              >
+                <div
+                  className="h-full rounded-full bg-theme-primary-05 transition-[width] duration-300"
+                  style={{ width: `${generationProgress}%` }}
                 />
-              )}
+              </div>
             </div>
           )}
         </Section>
@@ -1855,39 +2255,58 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
 
       <Card border="solid" rounding="lg">
         <CardLayout.Header>
-          <div className="flex flex-wrap items-center justify-between gap-2 p-2">
+          <div className="p-2 pb-1.5">
             <Content
               icon={SvgEdit}
-              title="编辑"
+              title="标签管理"
               description={`一级 ${nodeCounts.l1} · 二级 ${nodeCounts.l2} · 三级 ${nodeCounts.leaf}`}
               sizePreset="main-ui"
               variant="section"
             />
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex items-center gap-1 rounded-08 border border-border-01 bg-background-tint-01 p-0.5">
+          </div>
+          <div className="flex items-center justify-between gap-2 px-2 pb-2">
+            <div className="[&_.interactive-container]:min-w-32! [&_.interactive-container]:px-3!">
+              <Button
+                icon={SvgPlus}
+                prominence="secondary"
+                size="sm"
+                variant="action"
+                onClick={handleOpenAddRootNode}
+                disabled={isGeneratingTaxonomy}
+              >
+                新增一级标签
+              </Button>
+            </div>
+            <div className="flex shrink-0 items-center">
+              <div className="inline-flex items-center gap-0.5 rounded-04 border border-border-02 bg-background-neutral-00 p-0.5 [&_.interactive-container]:h-7! [&_.interactive-container]:rounded-04! [&_.interactive-container]:px-2!">
                 <Button
+                  icon={SvgBranch}
                   prominence={editorView === "tree" ? "secondary" : "tertiary"}
+                  aria-pressed={editorView === "tree"}
                   size="xs"
                   onClick={() => setEditorView("tree")}
                 >
                   树
                 </Button>
                 <Button
+                  icon={SvgBracketCurly}
                   prominence={editorView === "json" ? "secondary" : "tertiary"}
+                  aria-pressed={editorView === "json"}
                   size="xs"
                   onClick={() => setEditorView("json")}
                 >
                   JSON
                 </Button>
+                <div className="mx-0.5 h-4 w-px bg-border-02" aria-hidden />
+                <Button
+                  href={ADMIN_ROUTES.TAXONOMY_HISTORY.path}
+                  icon={SvgClock}
+                  prominence="tertiary"
+                  size="xs"
+                >
+                  版本历史
+                </Button>
               </div>
-              <Button
-                href={ADMIN_ROUTES.TAXONOMY_HISTORY.path}
-                icon={SvgClock}
-                prominence="secondary"
-                size="sm"
-              >
-                版本历史
-              </Button>
             </div>
           </div>
         </CardLayout.Header>
@@ -1908,36 +2327,18 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
               />
             </Section>
           ) : (
-            <Section gap={0.75}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <Button
-                  prominence="tertiary"
-                  size="sm"
-                  icon={SvgCheck}
-                  onClick={handleApplyJson}
-                >
-                  应用编辑
-                </Button>
-              </div>
+            <Section gap={0.75} alignItems="stretch">
               {jsonError && (
                 <MessageCard
-                  title="JSON 格式错误"
+                  title="JSON 校验提示"
                   description={jsonError}
                   padding="xs"
                 />
               )}
-              <InputTextArea
-                data-testid="taxonomy-json-editor"
+              <TaxonomyJsonEditor
                 value={taxonomyJson}
-                onChange={(e) => {
-                  setTaxonomyJson(e.target.value);
-                  setJsonError(null);
-                  setHasLocalTaxonomyChanges(true);
-                }}
-                rows={22}
-                maxRows={32}
-                autoResize
-                placeholder="粘贴或编辑 Taxonomy 节点 JSON"
+                error={jsonError}
+                onChange={syncTaxonomyJsonToTree}
               />
             </Section>
           )}
@@ -2009,6 +2410,10 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
         onClose={() => setDeleteNodeTarget(null)}
         onConfirm={handleConfirmRemoveNode}
       />
+      <TaxonomyGenerationConfigModal
+        open={generationConfigOpen}
+        onClose={() => setGenerationConfigOpen(false)}
+      />
     </Section>
   );
 }
@@ -2058,10 +2463,12 @@ const IMPORTED_ARTICLES_GRID_COLUMNS =
 
 function ArticleProgressCell({
   summary,
+  hasActiveTaggingTask,
 }: {
   summary: DocumentTaxonomySummary;
+  hasActiveTaggingTask: boolean;
 }) {
-  const stage = getArticleStage(summary);
+  const stage = getArticleStage(summary, { hasActiveTaggingTask });
 
   return (
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
@@ -2077,7 +2484,7 @@ function ArticleProgressCell({
           aria-label={stage.title}
         >
           <div
-            className="h-full rounded-full bg-theme-blue-05 transition-all duration-300"
+            className={`${getArticleProgressBarClass(stage.color)} h-full rounded-full transition-all duration-300`}
             style={{ width: `${stage.progress}%` }}
           />
         </div>
@@ -2286,8 +2693,8 @@ function SummaryEditorModal({
                       color={summary.is_manual ? "purple" : "gray"}
                     />
                     <Tag
-                      title={summary.current_label_status || "标签待生成"}
-                      color="gray"
+                      title={getArticleLabelStatusTag(summary).title}
+                      color={getArticleLabelStatusTag(summary).color}
                     />
                   </div>
                 </div>
@@ -2346,10 +2753,12 @@ function SummaryEditorModal({
 function ImportedArticleRow({
   articleNumber,
   summary,
+  hasActiveTaggingTask,
   onEditSummary,
 }: {
   articleNumber: number;
   summary: DocumentTaxonomySummary;
+  hasActiveTaggingTask: boolean;
   onEditSummary: (summary: DocumentTaxonomySummary) => void;
 }) {
   const tags = useDocumentTaxonomyTags(summary.document_id);
@@ -2368,7 +2777,10 @@ function ImportedArticleRow({
         <ArticleFileNameCell summary={summary} />
         <ArticleTimeCell summary={summary} />
         <ArticleSummaryStatus summary={summary} />
-        <ArticleProgressCell summary={summary} />
+        <ArticleProgressCell
+          summary={summary}
+          hasActiveTaggingTask={hasActiveTaggingTask}
+        />
         <ArticleTagsCell tags={tags} />
         <ArticleDetailCell summary={summary} onEditSummary={onEditSummary} />
       </div>
@@ -2424,8 +2836,10 @@ function ArticleListHeader({ count }: { count: number }) {
 
 function ImportedArticlesList({
   summaries,
+  hasActiveTaggingTask,
 }: {
   summaries: DocumentTaxonomySummary[];
+  hasActiveTaggingTask: boolean;
 }) {
   const [editingSummary, setEditingSummary] =
     useState<DocumentTaxonomySummary | null>(null);
@@ -2474,6 +2888,7 @@ function ImportedArticlesList({
               key={summary.document_id}
               articleNumber={index + 1}
               summary={summary}
+              hasActiveTaggingTask={hasActiveTaggingTask}
               onEditSummary={setEditingSummary}
             />
           ))}
@@ -2668,7 +3083,10 @@ function ImportedArticlesPanel({
       </div>
 
       {summaries.length ? (
-        <ImportedArticlesList summaries={summaries} />
+        <ImportedArticlesList
+          summaries={summaries}
+          hasActiveTaggingTask={queuedImportActive || Boolean(activeTask)}
+        />
       ) : (
         <ImportedArticlesEmptyState queued={queuedImportActive} />
       )}
@@ -2741,8 +3159,8 @@ function SummaryEditor({
             </Text>
           </div>
           <Tag
-            title={summary.current_label_status || summary.status}
-            color={summary.status === "complete" ? "green" : "amber"}
+            title={getArticleLabelStatusTag(summary).title}
+            color={getArticleLabelStatusTag(summary).color}
           />
         </div>
       )}
@@ -3300,6 +3718,413 @@ function ActiveTaxonomyPanel({
   );
 }
 
+function GenerationNumberField({
+  label,
+  description,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div className="border-b border-border-02 py-3 last:border-b-0">
+      <InputHorizontal title={label} description={description} withLabel>
+        <InputTypeIn
+          type="number"
+          min={min}
+          max={max}
+          value={String(value)}
+          onChange={(event) => {
+            const parsedValue = Number(event.target.value);
+            if (!Number.isNaN(parsedValue)) {
+              onChange(parsedValue);
+            }
+          }}
+          className="w-24"
+        />
+      </InputHorizontal>
+    </div>
+  );
+}
+
+function GenerationConfigStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <Text as="p" font="heading-h3" color="text-05">
+        {value}
+      </Text>
+      <Text as="p" font="figure-small-label" color="text-03" maxLines={1}>
+        {label}
+      </Text>
+    </div>
+  );
+}
+
+interface TaxonomyGenerationConfigEditorState {
+  activeConfig: TaxonomyGenerationConfig;
+  config?: TaxonomyGenerationConfig;
+  draftConfig: TaxonomyGenerationConfig | null;
+  firstStageInitialCount: number;
+  handleRestoreDefaults: () => void;
+  handleSave: () => Promise<void>;
+  saving: boolean;
+  thirdStageInitialCount: number;
+  updateDraftConfig: (patch: Partial<TaxonomyGenerationConfig>) => void;
+}
+
+function useTaxonomyGenerationConfigEditor({
+  onSaved,
+}: {
+  onSaved?: () => void;
+} = {}): TaxonomyGenerationConfigEditorState {
+  const { config, mutateConfig } = useTaxonomyGenerationConfig();
+  const [draftConfig, setDraftConfig] =
+    useState<TaxonomyGenerationConfig | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (config) {
+      setDraftConfig(config);
+    }
+  }, [config]);
+
+  const activeConfig = draftConfig || config || DEFAULT_TAXONOMY_GENERATION_CONFIG;
+  const firstStageInitialCount =
+    activeConfig.first_level_candidate_multiplier *
+    activeConfig.first_level_max_count;
+  const thirdStageInitialCount =
+    activeConfig.third_level_candidate_multiplier *
+    activeConfig.third_level_max_count;
+
+  const updateDraftConfig = (
+    patch: Partial<TaxonomyGenerationConfig>
+  ) => {
+    setDraftConfig((current) => ({
+      ...(current || activeConfig),
+      ...patch,
+    }));
+  };
+
+  const handleRestoreDefaults = () => {
+    if (!config) {
+      return;
+    }
+    setDraftConfig({
+      ...config,
+      first_level_candidate_multiplier: 4,
+      first_level_max_count: 20,
+      third_level_candidate_multiplier: 4,
+      third_level_max_count: 6,
+      third_level_parallelism: 10,
+    });
+  };
+
+  const handleSave = async () => {
+    if (!draftConfig) {
+      return;
+    }
+    if (
+      !draftConfig.l1_l2_prompt_template.trim() ||
+      !draftConfig.leaf_prompt_template.trim()
+    ) {
+      toast.error("提示词模板不能为空");
+      return;
+    }
+    setSaving(true);
+    try {
+      const savedConfig = await updateTaxonomyGenerationConfig({
+        ...draftConfig,
+        l1_l2_prompt_template: draftConfig.l1_l2_prompt_template.trim(),
+        leaf_prompt_template: draftConfig.leaf_prompt_template.trim(),
+      });
+      setDraftConfig(savedConfig);
+      await mutateConfig(savedConfig, false);
+      toast.success("生成参数已保存");
+      onSaved?.();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return {
+    activeConfig,
+    config,
+    draftConfig,
+    firstStageInitialCount,
+    handleRestoreDefaults,
+    handleSave,
+    saving,
+    thirdStageInitialCount,
+    updateDraftConfig,
+  };
+}
+
+function TaxonomyGenerationConfigFields({
+  editor,
+}: {
+  editor: TaxonomyGenerationConfigEditorState;
+}) {
+  return (
+    <div className="grid w-full grid-cols-[minmax(21rem,0.78fr)_minmax(0,1.22fr)] items-start gap-4">
+      <div className="grid min-w-0 grid-rows-[auto_3rem_auto] gap-y-3">
+        <Content
+          icon={SvgProgressBars}
+          title="生成参数"
+          sizePreset="main-ui"
+          variant="section"
+        />
+
+        <div className="grid h-12 grid-cols-2 items-start gap-4 border-b border-border-02 pb-3">
+          <GenerationConfigStat
+            label="一级/二级候选"
+            value={`${editor.firstStageInitialCount}`}
+          />
+          <GenerationConfigStat
+            label="三级每组候选"
+            value={`${editor.thirdStageInitialCount}`}
+          />
+        </div>
+
+        <div>
+          <Content
+            icon={SvgProgressBars}
+            title="数量控制"
+            description="控制发散强度、最终保留数量和三级标签生成并发。"
+            sizePreset="main-ui"
+            variant="section"
+          />
+          <div className="mt-2 flex flex-col gap-0.5">
+            <GenerationNumberField
+              label="X 发散倍数"
+              description="一级/二级初始候选数量倍数。"
+              value={editor.activeConfig.first_level_candidate_multiplier}
+              min={1}
+              max={20}
+              onChange={(value) =>
+                editor.updateDraftConfig({
+                  first_level_candidate_multiplier: value,
+                })
+              }
+            />
+            <GenerationNumberField
+              label="Y 最大数量"
+              description="一级标签和二级标签的最终数量上限。"
+              value={editor.activeConfig.first_level_max_count}
+              min={2}
+              max={80}
+              onChange={(value) =>
+                editor.updateDraftConfig({ first_level_max_count: value })
+              }
+            />
+            <GenerationNumberField
+              label="M 发散倍数"
+              description="三级标签初始候选数量倍数。"
+              value={editor.activeConfig.third_level_candidate_multiplier}
+              min={1}
+              max={20}
+              onChange={(value) =>
+                editor.updateDraftConfig({
+                  third_level_candidate_multiplier: value,
+                })
+              }
+            />
+            <GenerationNumberField
+              label="N 每组上限"
+              description="每个二级标签下的三级标签最终数量上限。"
+              value={editor.activeConfig.third_level_max_count}
+              min={1}
+              max={30}
+              onChange={(value) =>
+                editor.updateDraftConfig({ third_level_max_count: value })
+              }
+            />
+            <GenerationNumberField
+              label="P 并发数"
+              description="三级标签生成阶段的并行任务数量。"
+              value={editor.activeConfig.third_level_parallelism}
+              min={1}
+              max={20}
+              onChange={(value) =>
+                editor.updateDraftConfig({ third_level_parallelism: value })
+              }
+            />
+          </div>
+        </div>
+      </div>
+
+      <Tabs defaultValue="l1-l2">
+        <div className="grid min-w-0 grid-rows-[auto_3rem_auto] gap-y-3">
+          <Content
+            icon={SvgSparkle}
+            title="提示词模板"
+            sizePreset="main-ui"
+            variant="section"
+          />
+
+          <div className="flex h-12 items-start border-b border-border-02 pb-3">
+            <Tabs.List variant="underline">
+              <Tabs.Trigger value="l1-l2">一级/二级模板</Tabs.Trigger>
+              <Tabs.Trigger value="leaf">三级模板</Tabs.Trigger>
+            </Tabs.List>
+          </div>
+
+          <div>
+            <Tabs.Content value="l1-l2" className="pt-0">
+              <InputVertical title="L1/L2 Prompt Template" withLabel>
+                <InputTextArea
+                  value={editor.activeConfig.l1_l2_prompt_template}
+                  onChange={(event) =>
+                    editor.updateDraftConfig({
+                      l1_l2_prompt_template: event.target.value,
+                    })
+                  }
+                  rows={20}
+                  maxRows={26}
+                  autoResize
+                  className="[&_textarea]:font-main-content-mono [&_textarea]:leading-7"
+                />
+              </InputVertical>
+            </Tabs.Content>
+            <Tabs.Content value="leaf" className="pt-0">
+              <InputVertical title="Leaf Prompt Template" withLabel>
+                <InputTextArea
+                  value={editor.activeConfig.leaf_prompt_template}
+                  onChange={(event) =>
+                    editor.updateDraftConfig({
+                      leaf_prompt_template: event.target.value,
+                    })
+                  }
+                  rows={20}
+                  maxRows={26}
+                  autoResize
+                  className="[&_textarea]:font-main-content-mono [&_textarea]:leading-7"
+                />
+              </InputVertical>
+            </Tabs.Content>
+          </div>
+        </div>
+      </Tabs>
+    </div>
+  );
+}
+
+function TaxonomyGenerationConfigActions({
+  editor,
+  disabled = false,
+  saveLabel = "保存",
+}: {
+  editor: TaxonomyGenerationConfigEditorState;
+  disabled?: boolean;
+  saveLabel?: string;
+}) {
+  return (
+    <>
+      <Text font="secondary-body" color="text-03">
+        默认参数：X=4，Y=20，M=4，N=6，P=10。
+      </Text>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button
+          prominence="secondary"
+          variant="action"
+          onClick={editor.handleRestoreDefaults}
+          disabled={disabled || editor.saving}
+        >
+          恢复默认参数
+        </Button>
+        <Button
+          icon={editor.saving ? SpinningLoaderIcon : SvgCheck}
+          prominence="primary"
+          onClick={editor.handleSave}
+          disabled={disabled || editor.saving}
+        >
+          {editor.saving ? "保存中" : saveLabel}
+        </Button>
+      </div>
+    </>
+  );
+}
+
+function TaxonomyGenerationConfigPanel({
+  onSaved,
+}: {
+  onSaved?: () => void;
+} = {}) {
+  const editor = useTaxonomyGenerationConfigEditor({ onSaved });
+
+  if (!editor.config && !editor.draftConfig) {
+    return <EmptyMessageCard sizePreset="main-ui" title="正在加载生成参数" />;
+  }
+
+  return (
+    <Section gap={1} alignItems="stretch" justifyContent="start">
+      <TaxonomyGenerationConfigFields editor={editor} />
+      <div className="flex items-center justify-between gap-3">
+        <TaxonomyGenerationConfigActions editor={editor} />
+      </div>
+    </Section>
+  );
+}
+
+function TaxonomyGenerationConfigModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const editor = useTaxonomyGenerationConfigEditor({ onSaved: onClose });
+  const isLoading = !editor.config && !editor.draftConfig;
+
+  return (
+    <Modal open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <Modal.Content width="xl" height="lg" background="gray">
+        <DialogPrimitive.Title className="sr-only">
+          生成参数
+        </DialogPrimitive.Title>
+        <Modal.Body>
+          <div className="relative w-full pr-8">
+            <div className="absolute right-0 top-0 z-10">
+              <Button
+                icon={SvgX}
+                prominence="tertiary"
+                size="sm"
+                onClick={onClose}
+              />
+            </div>
+            {isLoading ? (
+              <EmptyMessageCard sizePreset="main-ui" title="正在加载生成参数" />
+            ) : (
+              <TaxonomyGenerationConfigFields editor={editor} />
+            )}
+          </div>
+        </Modal.Body>
+        <Modal.Footer justifyContent="between">
+          <TaxonomyGenerationConfigActions
+            disabled={isLoading}
+            editor={editor}
+            saveLabel="保存参数"
+          />
+        </Modal.Footer>
+      </Modal.Content>
+    </Modal>
+  );
+}
+
 export default function TaxonomyPage() {
   return <TaxonomyTemplateDraftPage />;
 }
@@ -3311,8 +4136,13 @@ export function TaxonomyTemplateDraftPage() {
     <TaxonomyPageLayout
       route={ADMIN_ROUTES.TAXONOMY_TEMPLATE_DRAFT}
       description="通过提示词快速生成三级标签体系，并在树视图或 JSON 视图中继续编辑。"
+      width="full"
     >
-      <TaxonomyBuilder versions={versions} />
+      <div className="flex w-full justify-center">
+        <div className="w-full max-w-[1480px]">
+          <TaxonomyBuilder versions={versions} />
+        </div>
+      </div>
     </TaxonomyPageLayout>
   );
 }
@@ -3391,6 +4221,22 @@ export function TaxonomyImportsPage() {
         onClose={() => setImportModalOpen(false)}
         onImportQueued={handleImportQueued}
       />
+    </TaxonomyPageLayout>
+  );
+}
+
+export function TaxonomyGenerationConfigPage() {
+  return (
+    <TaxonomyPageLayout
+      route={ADMIN_ROUTES.TAXONOMY_GENERATION_CONFIG}
+      description="管理标签生成的发散倍数、最终数量上限、三级并发数和系统提示词。"
+      width="full"
+    >
+      <div className="flex w-full justify-center">
+        <div className="w-full max-w-[1200px]">
+          <TaxonomyGenerationConfigPanel />
+        </div>
+      </div>
     </TaxonomyPageLayout>
   );
 }

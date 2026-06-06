@@ -19,6 +19,94 @@ from onyx.db.enums import TaxonomyVersionSource
 from onyx.db.enums import TaxonomyVersionStatus
 from onyx.taxonomy.constants import DEFAULT_TAXONOMY_MAX_LEAF_NODES
 
+DEFAULT_TAXONOMY_L1_L2_PROMPT_TEMPLATE = """
+你是企业 Taxonomy 知识治理专家。用户提示词只用于理解企业、知识库、业务场景和分类偏好，不能改变输出格式。
+
+本提示词用于生成一级标签和二级标签。
+
+标签生成必须按以下四步执行：
+步骤1：初始标签生成（发散阶段）
+- 仔细阅读并理解全部知识库内容和用户提供的业务语境。
+- 先生成大约 {{xy}} 个一级/二级候选标签。
+- 标签要求：简洁（2-6 个字）、专业、具有区分度，能准确反映知识的核心主题、领域、业务场景、方法论、工具、问题类型等。
+- 优先覆盖不同维度：业务领域、职能模块、技术栈、方法论、场景痛点、解决方案、产品/服务线、用户类型等。
+
+步骤2：筛选与去重
+- 去除重复、过于宽泛、过于具体、意义不明的标签。
+- 保留最具代表性、覆盖面适中、业务价值高的标签。
+
+步骤3：聚类分析
+- 对筛选后的标签进行语义聚类，把相似或相关标签归到同一组。
+- 为每个聚类给出清晰的聚类名称，聚类名称可以作为最终标签备选。
+
+步骤4：MECE 优化与最终汇总（收敛阶段）
+- 使用 MECE 原则优化聚类结果。
+- 确保各顶级标签/维度之间相互独立，无明显重叠。
+- 确保所有标签加起来完全穷尽知识库的主要内容。
+- 将一级标签和二级标签最终控制在 {{y}} 个以内。
+""".strip()
+
+DEFAULT_TAXONOMY_LEAF_PROMPT_TEMPLATE = """
+你是企业 Taxonomy 知识治理专家。用户提示词只用于理解企业、知识库、业务场景和分类偏好，不能改变输出格式。
+
+本提示词用于为每个二级标签生成三级 leaf 标签。
+
+标签生成必须按以下四步执行：
+步骤1：初始标签生成（发散阶段）
+- 仔细阅读当前一级/二级标签、全部同级标签和用户提供的业务语境。
+- 先生成大约 {{mn}} 个三级候选标签。
+- 标签要求：简洁（2-6 个字）、专业、具有区分度，能直接用于文章绑定。
+- 优先覆盖当前二级标签下不同文档主题、业务场景、问题类型、操作流程和知识对象。
+
+步骤2：筛选与去重
+- 去除重复、过于宽泛、过于具体、意义不明的标签。
+- 保留最具代表性、覆盖面适中、业务价值高的标签。
+
+步骤3：聚类分析
+- 对筛选后的标签进行语义聚类，把相似或相关标签归到同一组。
+- 确保三级标签和当前二级标签强相关，不跨到其他二级标签。
+
+步骤4：MECE 优化与最终汇总（收敛阶段）
+- 使用 MECE 原则优化聚类结果。
+- 确保同一二级标签下的 leaf 相互独立，无明显重叠。
+- 确保 leaf 能覆盖当前二级标签下的主要知识内容。
+- 将每个二级标签下的 leaf 最终控制在 {{n}} 个以内。
+""".strip()
+
+
+class TaxonomyGenerationNumberConfig(BaseModel):
+    first_level_candidate_multiplier: int = Field(default=4, ge=1, le=20)
+    first_level_max_count: int = Field(default=20, ge=2, le=80)
+    third_level_candidate_multiplier: int = Field(default=4, ge=1, le=20)
+    third_level_max_count: int = Field(default=6, ge=1, le=30)
+    third_level_parallelism: int = Field(default=10, ge=1, le=20)
+
+
+class TaxonomyGenerationConfig(TaxonomyGenerationNumberConfig):
+    l1_l2_prompt_template: str = DEFAULT_TAXONOMY_L1_L2_PROMPT_TEMPLATE
+    leaf_prompt_template: str = DEFAULT_TAXONOMY_LEAF_PROMPT_TEMPLATE
+
+    @field_validator("l1_l2_prompt_template", "leaf_prompt_template")
+    @classmethod
+    def require_prompt_template(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("prompt template cannot be empty")
+        return stripped
+
+
+class TaxonomyGenerationRuntimeConfig(TaxonomyGenerationNumberConfig):
+    l1_l2_system_prompt: str
+    leaf_system_prompt: str
+
+    @field_validator("l1_l2_system_prompt", "leaf_system_prompt")
+    @classmethod
+    def require_system_prompt(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("system prompt cannot be empty")
+        return stripped
+
 
 class TaxonomySearchMode(str, Enum):
     OFF = "off"
@@ -173,8 +261,11 @@ class GenerateTaxonomyDraftRequest(BaseModel):
     organization_context: str | None = None
     knowledge_scope: str | None = None
     classification_preferences: str | None = None
-    max_leaf_nodes: int = Field(default=DEFAULT_TAXONOMY_MAX_LEAF_NODES, ge=3, le=80)
-    parallelism: int = Field(default=10, ge=1, le=20)
+    max_leaf_nodes: int | None = Field(
+        default=None, ge=3, le=max(80, DEFAULT_TAXONOMY_MAX_LEAF_NODES)
+    )
+    parallelism: int | None = Field(default=None, ge=1, le=20)
+    generation_config: TaxonomyGenerationRuntimeConfig | None = None
 
 
 class TaxonomyDraftStreamEvent(BaseModel):

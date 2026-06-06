@@ -22,6 +22,7 @@ from onyx.taxonomy.llm_service import generate_taxonomy_draft
 from onyx.taxonomy.llm_service import generate_taxonomy_draft_events
 from onyx.taxonomy.llm_service import review_taxonomy_candidate_labels
 from onyx.taxonomy.llm_service import TaxonomyCandidateForHealthCheck
+from onyx.taxonomy.models import TaxonomyGenerationRuntimeConfig
 
 
 class StubLLM(LLM):
@@ -202,7 +203,22 @@ def test_generate_taxonomy_draft_repairs_malformed_json() -> None:
   ]
 }
 """
-    llm = StubLLM([malformed_json, repaired_json])
+    leaf_json = """
+{
+  "nodes": [
+    {
+      "name": "故障排查",
+      "definition": "产品故障、异常现象和定位处理",
+      "applicability": "故障定位、解决方案、排查步骤",
+      "keywords": ["故障"],
+      "synonyms": ["异常"],
+      "positive_examples": ["设备无法启动"],
+      "negative_examples": ["销售合同审批"]
+    }
+  ]
+}
+"""
+    llm = StubLLM([malformed_json, repaired_json, leaf_json, repaired_json])
 
     nodes = generate_taxonomy_draft(
         company_description="客户问题、产品故障和解决方案",
@@ -213,7 +229,7 @@ def test_generate_taxonomy_draft_repairs_malformed_json() -> None:
         llm=llm,
     )
 
-    assert len(llm.invoke_calls) == 2
+    assert len(llm.invoke_calls) == 4
     assert all(
         call["structured_response_format"] == {"type": "json_object"}
         for call in llm.invoke_calls
@@ -237,7 +253,63 @@ def test_generate_taxonomy_draft_does_not_force_json_mode_for_other_providers() 
       "applicability": "客户咨询、问题排查、售后支持",
       "keywords": ["客户"],
       "synonyms": ["客服"],
-      "children": []
+            "children": [
+              {
+                "name": "问题处理",
+                "definition": "客户问题识别、分流和处理流程",
+                "applicability": "咨询、投诉、故障处理",
+                "keywords": ["问题"],
+                "synonyms": ["客诉"]
+              }
+            ]
+    }
+  ]
+}
+""",
+            """
+{
+  "nodes": [
+    {
+      "name": "故障排查",
+      "definition": "产品故障、异常现象和定位处理",
+      "applicability": "故障定位、解决方案、排查步骤",
+      "keywords": ["故障"],
+      "synonyms": ["异常"],
+      "positive_examples": ["设备无法启动"],
+      "negative_examples": ["销售合同审批"]
+    }
+  ]
+}
+""",
+            """
+{
+  "nodes": [
+    {
+      "name": "客户服务",
+      "definition": "客户问题和服务处理相关内容",
+      "applicability": "客户咨询、问题排查、售后支持",
+      "keywords": ["客户"],
+      "synonyms": ["客服"],
+      "children": [
+        {
+          "name": "问题处理",
+          "definition": "客户问题识别、分流和处理流程",
+          "applicability": "咨询、投诉、故障处理",
+          "keywords": ["问题"],
+          "synonyms": ["客诉"],
+          "children": [
+            {
+              "name": "故障排查",
+              "definition": "产品故障、异常现象和定位处理",
+              "applicability": "故障定位、解决方案、排查步骤",
+              "keywords": ["故障"],
+              "synonyms": ["异常"],
+              "positive_examples": ["设备无法启动"],
+              "negative_examples": ["销售合同审批"]
+            }
+          ]
+        }
+      ]
     }
   ]
 }
@@ -255,13 +327,13 @@ def test_generate_taxonomy_draft_does_not_force_json_mode_for_other_providers() 
         llm=llm,
     )
 
-    assert len(llm.invoke_calls) == 1
-    assert llm.invoke_calls[0]["structured_response_format"] is None
+    assert len(llm.invoke_calls) == 3
+    assert all(call["structured_response_format"] is None for call in llm.invoke_calls)
     assert nodes[0].name == "客户服务"
 
 
 def test_generate_taxonomy_draft_events_streams_layered_nodes_and_final() -> None:
-    l1_json = """
+    l1_l2_json = """
 {
   "nodes": [
     {
@@ -270,8 +342,15 @@ def test_generate_taxonomy_draft_events_streams_layered_nodes_and_final() -> Non
       "applicability": "咨询、投诉、维修和解决方案",
       "keywords": ["客户"],
       "synonyms": ["客服"],
-      "target_l2_count": 1,
-      "target_leaf_count": 2
+      "children": [
+        {
+          "name": "售后处理",
+          "definition": "售后问题处理流程",
+          "applicability": "报修、排查、维修进度",
+          "keywords": ["售后"],
+          "synonyms": ["维修"]
+        }
+      ]
     },
     {
       "name": "产品知识",
@@ -279,36 +358,15 @@ def test_generate_taxonomy_draft_events_streams_layered_nodes_and_final() -> Non
       "applicability": "产品手册、功能说明和培训资料",
       "keywords": ["产品"],
       "synonyms": ["产品资料"],
-      "target_l2_count": 1,
-      "target_leaf_count": 2
-    }
-  ]
-}
-"""
-    customer_l2_json = """
-{
-  "nodes": [
-    {
-      "name": "售后处理",
-      "definition": "售后问题处理流程",
-      "applicability": "报修、排查、维修进度",
-      "keywords": ["售后"],
-      "synonyms": ["维修"],
-      "target_leaf_count": 2
-    }
-  ]
-}
-"""
-    product_l2_json = """
-{
-  "nodes": [
-    {
-      "name": "产品说明",
-      "definition": "产品功能和使用说明",
-      "applicability": "说明书、功能介绍、培训材料",
-      "keywords": ["说明"],
-      "synonyms": ["手册"],
-      "target_leaf_count": 2
+      "children": [
+        {
+          "name": "产品说明",
+          "definition": "产品功能和使用说明",
+          "applicability": "说明书、功能介绍、培训材料",
+          "keywords": ["说明"],
+          "synonyms": ["手册"]
+        }
+      ]
     }
   ]
 }
@@ -442,11 +500,9 @@ def test_generate_taxonomy_draft_events_streams_layered_nodes_and_final() -> Non
 """
     llm = RoutingStubLLM(
         [
-            ("请先生成一级标签大纲", l1_json),
+            ("请一次性生成一级/二级标签树", l1_l2_json),
             ("当前二级标签：\n- id: generated.l1.0.l2.0", customer_leaf_json),
             ("当前二级标签：\n- id: generated.l1.1.l2.0", product_leaf_json),
-            ("当前一级标签：\n- id: generated.l1.0", customer_l2_json),
-            ("当前一级标签：\n- id: generated.l1.1", product_l2_json),
             ("全局审稿 Agent", optimized_json),
         ]
     )
@@ -459,13 +515,44 @@ def test_generate_taxonomy_draft_events_streams_layered_nodes_and_final() -> Non
             classification_preferences=None,
             max_leaf_nodes=4,
             parallelism=10,
+            generation_config=TaxonomyGenerationRuntimeConfig(
+                first_level_candidate_multiplier=5,
+                first_level_max_count=4,
+                third_level_candidate_multiplier=3,
+                third_level_max_count=2,
+                third_level_parallelism=7,
+                l1_l2_system_prompt="前端渲染后的一级二级提示词：X=5 Y=4 XY=20",
+                leaf_system_prompt="前端渲染后的三级提示词：M=3 N=2 MN=6 P=7",
+            ),
             llm=llm,
         )
     )
 
-    assert len(llm.invoke_calls) == 6
+    assert len(llm.invoke_calls) == 4
+    prompt_texts = [
+        str(getattr(call["prompt"], "content", call["prompt"]))
+        for call in llm.invoke_calls
+    ]
+    assert "前端渲染后的一级二级提示词：X=5 Y=4 XY=20" in prompt_texts[0]
+    assert "前端渲染后的三级提示词" not in prompt_texts[0]
+    assert all(
+        "前端渲染后的三级提示词：M=3 N=2 MN=6 P=7" in prompt_text
+        for prompt_text in prompt_texts[1:3]
+    )
+    assert all(
+        "前端渲染后的一级二级提示词" not in prompt_text
+        for prompt_text in prompt_texts[1:3]
+    )
+    assert "前端渲染后的一级二级提示词：X=5 Y=4 XY=20" in prompt_texts[3]
+    assert "前端渲染后的三级提示词：M=3 N=2 MN=6 P=7" in prompt_texts[3]
+    assert all("当前任务参数" not in prompt_text for prompt_text in prompt_texts)
+    assert all("初始候选标签数量" not in prompt_text for prompt_text in prompt_texts)
+    assert all("初始候选三级标签数量" not in prompt_text for prompt_text in prompt_texts)
     assert events[0].type == "stage"
-    assert any(event.message == "已生成「客户服务」下的二级标签" for event in events)
+    assert any(
+        event.message == "一级/二级标签已完成 MECE 收敛，开始并行生成三级标签"
+        for event in events
+    )
     assert any(event.message == "已生成「售后处理」下的三级标签" for event in events)
     assert events[-1].type == "final"
     assert events[-1].progress == 100

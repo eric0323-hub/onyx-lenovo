@@ -101,6 +101,12 @@ export const ADMIN_ROUTES = {
     title: "文章管理",
     sidebarLabel: "文章管理",
   },
+  TAXONOMY_GENERATION_CONFIG: {
+    path: "/admin/taxonomy/generation-config",
+    icon: SvgProgressBars,
+    title: "生成参数",
+    sidebarLabel: "生成参数",
+  },
   TAXONOMY_HISTORY: {
     path: "/admin/taxonomy/history",
     icon: SvgHistory,

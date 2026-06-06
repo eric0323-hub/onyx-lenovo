@@ -361,6 +361,7 @@ const adminRouteFeatureEntries: [string, FeatureVisibilityKey][] = [
   ["/admin/taxonomy", "adminTaxonomy"],
   ["/admin/taxonomy/template-draft", "adminTaxonomy"],
   ["/admin/taxonomy/imports", "adminTaxonomy"],
+  ["/admin/taxonomy/generation-config", "adminTaxonomy"],
   ["/admin/taxonomy/summaries", "adminTaxonomy"],
   ["/admin/taxonomy/batch-tagging", "adminTaxonomy"],
   ["/admin/taxonomy/query-match", "adminTaxonomy"],

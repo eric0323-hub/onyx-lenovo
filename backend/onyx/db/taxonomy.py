@@ -703,8 +703,32 @@ def get_document_summaries(
         .order_by(Document.last_modified.desc())
         .limit(limit)
     ).all()
+    document_ids = [document.id for document, _ in rows]
+    label_statuses_by_document: dict[str, TaxonomyAssignmentStatus] = {}
+    if document_ids:
+        label_status_priority = {
+            TaxonomyAssignmentStatus.ACTIVE: 0,
+            TaxonomyAssignmentStatus.NEEDS_REVIEW: 1,
+            TaxonomyAssignmentStatus.NEEDS_RETAG: 2,
+            TaxonomyAssignmentStatus.DEPENDS_ON_DISABLED_LABEL: 3,
+        }
+        label_status_rows = db_session.execute(
+            select(DocumentTaxonomyTag.document_id, DocumentTaxonomyTag.status).where(
+                DocumentTaxonomyTag.document_id.in_(document_ids),
+                DocumentTaxonomyTag.status != TaxonomyAssignmentStatus.STALE,
+            )
+        ).all()
+        for document_id, status in label_status_rows:
+            current_status = label_statuses_by_document.get(document_id)
+            if current_status is None or label_status_priority.get(
+                status, len(label_status_priority)
+            ) < label_status_priority.get(current_status, len(label_status_priority)):
+                label_statuses_by_document[document_id] = status
+
     snapshots: list[DocumentTaxonomySummarySnapshot] = []
     for document, summary in rows:
+        label_status = label_statuses_by_document.get(document.id)
+        current_label_status = label_status.value if label_status else None
         if summary:
             snapshots.append(
                 DocumentTaxonomySummarySnapshot(
@@ -716,7 +740,7 @@ def get_document_summaries(
                     failure_reason=summary.failure_reason,
                     generated_at=summary.generated_at,
                     updated_at=summary.updated_at,
-                    current_label_status=None,
+                    current_label_status=current_label_status,
                 )
             )
         else:
@@ -730,7 +754,7 @@ def get_document_summaries(
                     failure_reason=None,
                     generated_at=None,
                     updated_at=document.last_modified,
-                    current_label_status=None,
+                    current_label_status=current_label_status,
                 )
             )
     return snapshots

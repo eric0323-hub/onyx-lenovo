@@ -32,6 +32,8 @@ from onyx.db.taxonomy import get_document_summaries
 from onyx.db.taxonomy import get_taxonomy_coverage
 from onyx.db.taxonomy import taxonomy_snapshot
 from onyx.db.taxonomy import taxonomy_version_snapshot
+from onyx.db.taxonomy_generation_config import get_taxonomy_generation_config
+from onyx.db.taxonomy_generation_config import set_taxonomy_generation_config
 from onyx.error_handling.error_codes import OnyxErrorCode
 from onyx.error_handling.exceptions import OnyxError
 from onyx.file_store.file_store import get_default_file_store
@@ -52,6 +54,8 @@ from onyx.taxonomy.models import GenerateTaxonomyDraftRequest
 from onyx.taxonomy.models import MatchTaxonomyQueryRequest
 from onyx.taxonomy.models import StartTaggingRequest
 from onyx.taxonomy.models import TaxonomyDashboardResponse
+from onyx.taxonomy.models import TaxonomyGenerationConfig
+from onyx.taxonomy.models import TaxonomyGenerationRuntimeConfig
 from onyx.taxonomy.models import TaxonomyTaggingTaskSnapshot
 from onyx.taxonomy.models import UpdateSummaryRequest
 from onyx.taxonomy.search_matcher import match_taxonomy_query
@@ -61,6 +65,24 @@ from onyx.taxonomy.service import update_manual_summary
 from shared_configs.contextvars import get_current_tenant_id
 
 router = APIRouter(prefix="/admin/taxonomy")
+
+
+def _runtime_generation_config_from_template_config(
+    generation_config: TaxonomyGenerationConfig,
+) -> TaxonomyGenerationRuntimeConfig:
+    return TaxonomyGenerationRuntimeConfig(
+        first_level_candidate_multiplier=(
+            generation_config.first_level_candidate_multiplier
+        ),
+        first_level_max_count=generation_config.first_level_max_count,
+        third_level_candidate_multiplier=(
+            generation_config.third_level_candidate_multiplier
+        ),
+        third_level_max_count=generation_config.third_level_max_count,
+        third_level_parallelism=generation_config.third_level_parallelism,
+        l1_l2_system_prompt=generation_config.l1_l2_prompt_template,
+        leaf_system_prompt=generation_config.leaf_prompt_template,
+    )
 
 
 @router.get("/dashboard")
@@ -109,11 +131,34 @@ def get_default_template(
     return DefaultTemplateResponse(nodes=get_default_taxonomy_template())
 
 
+@router.get("/generation-config")
+def get_generation_config(
+    _: object = Depends(require_permission(Permission.FULL_ADMIN_PANEL_ACCESS)),
+) -> TaxonomyGenerationConfig:
+    return get_taxonomy_generation_config()
+
+
+@router.put("/generation-config")
+def update_generation_config(
+    request: TaxonomyGenerationConfig,
+    _: object = Depends(require_permission(Permission.FULL_ADMIN_PANEL_ACCESS)),
+) -> TaxonomyGenerationConfig:
+    try:
+        return set_taxonomy_generation_config(request)
+    except ValueError as e:
+        raise OnyxError(OnyxErrorCode.INVALID_INPUT, str(e)) from e
+
+
 @router.post("/generate-draft")
 def generate_draft(
     request: GenerateTaxonomyDraftRequest,
     _: object = Depends(require_permission(Permission.FULL_ADMIN_PANEL_ACCESS)),
 ) -> DefaultTemplateResponse:
+    generation_config = request.generation_config or (
+        _runtime_generation_config_from_template_config(
+            get_taxonomy_generation_config()
+        )
+    )
     try:
         nodes = generate_taxonomy_draft(
             company_description=request.company_description,
@@ -121,6 +166,7 @@ def generate_draft(
             knowledge_scope=request.knowledge_scope,
             classification_preferences=request.classification_preferences,
             max_leaf_nodes=request.max_leaf_nodes,
+            generation_config=generation_config,
         )
     except Exception as e:
         raise OnyxError(OnyxErrorCode.INTERNAL_ERROR, str(e)) from e
@@ -132,6 +178,12 @@ def generate_draft_stream(
     request: GenerateTaxonomyDraftRequest,
     _: object = Depends(require_permission(Permission.FULL_ADMIN_PANEL_ACCESS)),
 ) -> StreamingResponse:
+    generation_config = request.generation_config or (
+        _runtime_generation_config_from_template_config(
+            get_taxonomy_generation_config()
+        )
+    )
+
     def event_generator() -> Iterator[str]:
         try:
             for event in generate_taxonomy_draft_events(
@@ -141,6 +193,7 @@ def generate_draft_stream(
                 classification_preferences=request.classification_preferences,
                 max_leaf_nodes=request.max_leaf_nodes,
                 parallelism=request.parallelism,
+                generation_config=generation_config,
             ):
                 yield f"data: {event.model_dump_json()}\n\n"
         except Exception as e:

@@ -51,6 +51,7 @@ export const SWR_KEYS = {
   connectorStatus: "/api/manage/connector-status",
   taxonomyDashboard: "/api/admin/taxonomy/dashboard",
   taxonomyDefaultTemplate: "/api/admin/taxonomy/default-template",
+  taxonomyGenerationConfig: "/api/admin/taxonomy/generation-config",
   taxonomyVersions: "/api/admin/taxonomy/versions",
   taxonomyDocumentTags: (documentId: string) =>
     `taxonomy-document-tags:${documentId}`,

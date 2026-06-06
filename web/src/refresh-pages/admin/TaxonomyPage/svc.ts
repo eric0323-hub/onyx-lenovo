@@ -187,7 +187,9 @@ export async function generateSummaries(args: {
   return result;
 }
 
-export async function importArticles(files: File[]): Promise<ArticleImportResponse> {
+export async function importArticles(
+  files: File[]
+): Promise<ArticleImportResponse> {
   const formData = new FormData();
   files.forEach((file) => {
     formData.append("files", file);
@@ -200,6 +202,18 @@ export async function importArticles(files: File[]): Promise<ArticleImportRespon
   const result = await parseResponse<ArticleImportResponse>(response);
   await mutate(SWR_KEYS.taxonomyDashboard);
   return result;
+}
+
+export async function deleteImportedArticle(documentId: string): Promise<void> {
+  const response = await fetch(
+    `/api/admin/taxonomy/articles/${encodeURIComponent(documentId)}`,
+    { method: "DELETE" }
+  );
+  await parseResponse<{ status: string; deleted: string }>(response);
+  await Promise.all([
+    mutate(SWR_KEYS.taxonomyDashboard),
+    mutate(SWR_KEYS.taxonomyDocumentTags(documentId)),
+  ]);
 }
 
 export async function updateSummary(

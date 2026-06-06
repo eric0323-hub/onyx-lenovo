@@ -158,6 +158,7 @@ class TaxonomyAssignmentStatus(str, PyEnum):
     NEEDS_REVIEW = "needs_review"
     NEEDS_RETAG = "needs_retag"
     DEPENDS_ON_DISABLED_LABEL = "depends_on_disabled_label"
+    TAGGING_FAILED = "tagging_failed"
 
 
 class TaxonomyReviewStatus(str, PyEnum):

@@ -33,6 +33,7 @@ import {
   MessageCard,
   Tag,
   Text,
+  Tooltip,
 } from "@opal/components";
 import {
   Card as CardLayout,
@@ -66,6 +67,7 @@ import { toast } from "@/hooks/useToast";
 import {
   activateTaxonomyVersion,
   createTaxonomyDraft,
+  deleteImportedArticle,
   fetchDocumentTaxonomyTags,
   fetchTaxonomyGenerationConfig,
   generateSummaries,
@@ -437,26 +439,13 @@ function getArticleLabelStatusLabel(
       return "需重新打标";
     case "depends_on_disabled_label":
       return "标签不可用";
+    case "tagging_failed":
+      return "打标签失败";
     case null:
     case undefined:
       return "标签待生成";
     default:
       return status;
-  }
-}
-
-function getArticleProgressBarClass(color: ArticleStage["color"]) {
-  switch (color) {
-    case "green":
-      return "bg-theme-green-05";
-    case "amber":
-      return "bg-theme-yellow-05";
-    case "gray":
-      return "bg-background-tint-05";
-    case "blue":
-      return "bg-theme-blue-05";
-    default:
-      return "bg-theme-blue-05";
   }
 }
 
@@ -509,6 +498,13 @@ function getArticleStage(
         title: getArticleLabelStatusLabel(summary.current_label_status),
         description: "当前标签依赖已停用节点",
         progress: 85,
+        color: "amber" as const,
+      };
+    case "tagging_failed":
+      return {
+        title: getArticleLabelStatusLabel(summary.current_label_status),
+        description: "标签生成失败，需要人工处理",
+        progress: 100,
         color: "amber" as const,
       };
     case null:
@@ -1979,9 +1975,7 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
     setHasLocalTaxonomyChanges(true);
 
     try {
-      const nodes = normalizeTaxonomyNodes(
-        parseTaxonomyNodesJson(nextJson)
-      );
+      const nodes = normalizeTaxonomyNodes(parseTaxonomyNodesJson(nextJson));
       const validationMessage = getTaxonomyValidationMessage(
         validateTaxonomyNodes(nodes)
       );
@@ -2231,7 +2225,12 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
                   <div className="flex size-6 shrink-0 items-center justify-center rounded-08 border border-border-01 bg-background-neutral-00">
                     <SvgLoader className="size-3.5 animate-spin text-text-03" />
                   </div>
-                  <Text as="p" font="secondary-body" color="text-04" maxLines={1}>
+                  <Text
+                    as="p"
+                    font="secondary-body"
+                    color="text-04"
+                    maxLines={1}
+                  >
                     {generationStatusMessage}
                   </Text>
                 </div>
@@ -2418,32 +2417,58 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
   );
 }
 
-function ArticleTagList({
-  tags,
-  maxVisible = 2,
-}: {
-  tags: DocumentTaxonomyTag[];
-  maxVisible?: number;
-}) {
-  const activeTags = tags.filter((tag) => tag.status === "active");
+function ArticleTagResultList({ tags }: { tags: DocumentTaxonomyTag[] }) {
+  const failedTag = tags.find((tag) => tag.status === "tagging_failed");
+  if (failedTag) {
+    const failedStatus = (
+      <div className="w-fit">
+        <Tag title="打标签失败" color="amber" />
+      </div>
+    );
 
-  if (!activeTags.length) {
-    return <Tag title="暂无标签" color="gray" />;
+    return failedTag.unmatched_reason ? (
+      <Tooltip tooltip={failedTag.unmatched_reason}>{failedStatus}</Tooltip>
+    ) : (
+      failedStatus
+    );
   }
 
-  const visibleTags = activeTags.slice(0, maxVisible);
-  const hiddenCount = activeTags.length - visibleTags.length;
+  const activeTags = tags.filter((tag) => tag.status === "active");
+  if (!activeTags.length) {
+    return (
+      <div className="w-fit">
+        <Tag title="暂无标签" color="gray" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-      {visibleTags.map((tag) => (
-        <Tag
-          key={tag.id}
-          title={`${tag.full_path_snapshot} · ${(tag.confidence * 100).toFixed(0)}%`}
-          color={tag.review_status === "confirmed" ? "green" : "blue"}
-        />
-      ))}
-      {hiddenCount > 0 && <Tag title={`+${hiddenCount}`} color="gray" />}
+      {activeTags.map((tag) => {
+        const title = getDocumentTaxonomyTagTitle(tag);
+        const colorClass =
+          tag.review_status === "confirmed"
+            ? "bg-theme-green-01 text-theme-green-05"
+            : "bg-theme-blue-01 text-theme-blue-05";
+
+        return (
+          <Tooltip key={tag.id} tooltip={title}>
+            <div
+              className={`flex h-4 max-w-[15rem] min-w-0 items-center overflow-hidden rounded-04 px-1 ${colorClass}`}
+              title={title}
+            >
+              <Text
+                as="p"
+                font="figure-small-value"
+                color="inherit"
+                maxLines={1}
+              >
+                {title}
+              </Text>
+            </div>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }
@@ -2459,7 +2484,7 @@ function getSummaryStatusColor(status: DocumentTaxonomySummary["status"]) {
 }
 
 const IMPORTED_ARTICLES_GRID_COLUMNS =
-  "3rem minmax(0,2fr) minmax(140px,0.65fr) 112px minmax(220px,0.9fr) minmax(160px,220px) 5rem";
+  "3rem minmax(13rem,1.55fr) 10.5rem 7rem 5rem minmax(12rem,1.25fr) 7.5rem";
 
 function ArticleProgressCell({
   summary,
@@ -2471,24 +2496,7 @@ function ArticleProgressCell({
   const stage = getArticleStage(summary, { hasActiveTaggingTask });
 
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
-      <div className="min-w-0">
-        <div className="mb-1 flex min-w-0 items-center gap-1.5">
-          <Tag title={stage.title} color={stage.color} />
-          <Text as="p" font="secondary-body" color="text-03" maxLines={1}>
-            {stage.description}
-          </Text>
-        </div>
-        <div
-          className="h-1.5 overflow-hidden rounded-full bg-background-tint-02"
-          aria-label={stage.title}
-        >
-          <div
-            className={`${getArticleProgressBarClass(stage.color)} h-full rounded-full transition-all duration-300`}
-            style={{ width: `${stage.progress}%` }}
-          />
-        </div>
-      </div>
+    <div className="flex min-w-0 justify-center">
       <Text font="main-ui-action" color="text-05" nowrap>
         {`${stage.progress}%`}
       </Text>
@@ -2502,7 +2510,7 @@ function ArticleSummaryStatus({
   summary: DocumentTaxonomySummary;
 }) {
   return (
-    <div className="flex min-w-0 items-center">
+    <div className="flex min-w-0 items-center justify-center">
       <Tag
         title={getSummaryStatusLabel(summary.status)}
         color={getSummaryStatusColor(summary.status)}
@@ -2516,27 +2524,35 @@ function ArticleFileNameCell({
 }: {
   summary: DocumentTaxonomySummary;
 }) {
+  const title = getDocumentTitle(summary);
+
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" title={title}>
       <Text as="p" font="main-ui-action" color="text-05" maxLines={1}>
-        {getDocumentTitle(summary)}
+        {title}
       </Text>
     </div>
   );
 }
 
 function ArticleTimeCell({ summary }: { summary: DocumentTaxonomySummary }) {
+  const timestamp = formatDate(summary.generated_at || summary.updated_at);
+
   return (
-    <div className="min-w-0">
+    <div className="flex min-w-0 justify-center" title={timestamp}>
       <Text as="p" font="secondary-body" color="text-03" maxLines={1}>
-        {formatDate(summary.generated_at || summary.updated_at)}
+        {timestamp}
       </Text>
     </div>
   );
 }
 
+function getDocumentTaxonomyTagTitle(tag: DocumentTaxonomyTag) {
+  return `${tag.full_path_snapshot} · ${(tag.confidence * 100).toFixed(0)}%`;
+}
+
 function CompactArticleTag({ tag }: { tag: DocumentTaxonomyTag }) {
-  const title = `${tag.full_path_snapshot} · ${(tag.confidence * 100).toFixed(0)}%`;
+  const title = getDocumentTaxonomyTagTitle(tag);
   const colorClass =
     tag.review_status === "confirmed"
       ? "bg-theme-green-01 text-theme-green-05"
@@ -2544,7 +2560,7 @@ function CompactArticleTag({ tag }: { tag: DocumentTaxonomyTag }) {
 
   return (
     <div
-      className={`flex h-4 max-w-[10.5rem] min-w-0 items-center overflow-hidden rounded-04 px-1 ${colorClass}`}
+      className={`flex h-4 max-w-full min-w-0 items-center overflow-hidden rounded-04 px-1 ${colorClass}`}
       title={title}
     >
       <Text as="p" font="figure-small-value" color="inherit" maxLines={1}>
@@ -2554,9 +2570,20 @@ function CompactArticleTag({ tag }: { tag: DocumentTaxonomyTag }) {
   );
 }
 
-function CompactHiddenTagCount({ count }: { count: number }) {
+function CompactHiddenTagCount({
+  count,
+  tags,
+}: {
+  count: number;
+  tags: DocumentTaxonomyTag[];
+}) {
+  const title = tags.map(getDocumentTaxonomyTagTitle).join("\n");
+
   return (
-    <div className="flex h-4 shrink-0 items-center rounded-04 bg-background-tint-02 px-1">
+    <div
+      className="flex h-4 shrink-0 items-center rounded-04 bg-background-tint-02 px-1"
+      title={title}
+    >
       <Text as="p" font="figure-small-value" color="text-03" nowrap>
         {`+${count}`}
       </Text>
@@ -2565,9 +2592,24 @@ function CompactHiddenTagCount({ count }: { count: number }) {
 }
 
 function ArticleTagsCell({ tags }: { tags: DocumentTaxonomyTag[] }) {
+  const failedTag = tags.find((tag) => tag.status === "tagging_failed");
+  if (failedTag) {
+    const failedStatus = <Tag title="打标签失败" color="amber" />;
+    return (
+      <div className="flex min-w-0 justify-center">
+        {failedTag.unmatched_reason ? (
+          <Tooltip tooltip={failedTag.unmatched_reason}>{failedStatus}</Tooltip>
+        ) : (
+          failedStatus
+        )}
+      </div>
+    );
+  }
+
   const activeTags = tags.filter((tag) => tag.status === "active");
   const visibleTags = activeTags.slice(0, 1);
-  const hiddenCount = activeTags.length - visibleTags.length;
+  const hiddenTags = activeTags.slice(visibleTags.length);
+  const hiddenCount = hiddenTags.length;
 
   if (!activeTags.length) {
     return (
@@ -2582,7 +2624,9 @@ function ArticleTagsCell({ tags }: { tags: DocumentTaxonomyTag[] }) {
       {visibleTags.map((tag) => (
         <CompactArticleTag key={tag.id} tag={tag} />
       ))}
-      {hiddenCount > 0 && <CompactHiddenTagCount count={hiddenCount} />}
+      {hiddenCount > 0 && (
+        <CompactHiddenTagCount count={hiddenCount} tags={hiddenTags} />
+      )}
     </div>
   );
 }
@@ -2590,13 +2634,16 @@ function ArticleTagsCell({ tags }: { tags: DocumentTaxonomyTag[] }) {
 function ArticleDetailCell({
   summary,
   onEditSummary,
+  onDeleteSummary,
 }: {
   summary: DocumentTaxonomySummary;
   onEditSummary: (summary: DocumentTaxonomySummary) => void;
+  onDeleteSummary: (summary: DocumentTaxonomySummary) => void;
 }) {
   return (
-    <div className="flex min-w-0 justify-end">
+    <div className="flex min-w-0 justify-end gap-1">
       <Button
+        aria-label="查看文章详情"
         icon={SvgEdit}
         prominence="tertiary"
         size="sm"
@@ -2605,7 +2652,71 @@ function ArticleDetailCell({
       >
         详情
       </Button>
+      <Button
+        aria-label="删除文章"
+        icon={SvgTrash}
+        prominence="tertiary"
+        variant="danger"
+        size="sm"
+        tooltip="删除文章"
+        onClick={() => onDeleteSummary(summary)}
+      />
     </div>
+  );
+}
+
+function ArticleDeleteConfirmModal({
+  summary,
+  deleting,
+  onClose,
+  onConfirm,
+}: {
+  summary: DocumentTaxonomySummary | null;
+  deleting: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!summary) {
+    return null;
+  }
+
+  return (
+    <Modal
+      open
+      onOpenChange={(open) => {
+        if (!open && !deleting) {
+          onClose();
+        }
+      }}
+    >
+      <Modal.Content width="sm" height="fit">
+        <Modal.Header
+          icon={SvgTrash}
+          title="删除文章"
+          description="删除后会从文章导入列表、标签结果和文档索引中移除。"
+          onClose={deleting ? undefined : onClose}
+        />
+        <Modal.Body>
+          <Text as="p" font="main-ui-body" color="text-04">
+            {`确定删除「${getDocumentTitle(summary)}」吗？`}
+          </Text>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button prominence="secondary" onClick={onClose} disabled={deleting}>
+            取消
+          </Button>
+          <Button
+            icon={deleting ? SpinningLoaderIcon : SvgTrash}
+            prominence="primary"
+            variant="danger"
+            onClick={onConfirm}
+            disabled={deleting}
+          >
+            {deleting ? "删除中" : "删除"}
+          </Button>
+        </Modal.Footer>
+      </Modal.Content>
+    </Modal>
   );
 }
 
@@ -2726,7 +2837,7 @@ function SummaryEditorModal({
                       {`${tags.filter((tag) => tag.status === "active").length} 个有效标签`}
                     </Text>
                   </div>
-                  <ArticleTagList tags={tags} />
+                  <ArticleTagResultList tags={tags} />
                 </div>
               </Card>
             </Section>
@@ -2755,21 +2866,23 @@ function ImportedArticleRow({
   summary,
   hasActiveTaggingTask,
   onEditSummary,
+  onDeleteSummary,
 }: {
   articleNumber: number;
   summary: DocumentTaxonomySummary;
   hasActiveTaggingTask: boolean;
   onEditSummary: (summary: DocumentTaxonomySummary) => void;
+  onDeleteSummary: (summary: DocumentTaxonomySummary) => void;
 }) {
   const tags = useDocumentTaxonomyTags(summary.document_id);
 
   return (
     <div className="border-b border-border-01 px-4 py-2.5 last:border-b-0">
       <div
-        className="grid items-center gap-3"
+        className="grid w-full items-center gap-3"
         style={{ gridTemplateColumns: IMPORTED_ARTICLES_GRID_COLUMNS }}
       >
-        <div className="flex min-w-0 justify-center">
+        <div className="flex min-w-0 justify-start">
           <Text as="p" font="main-ui-action" color="text-03" nowrap>
             {String(articleNumber)}
           </Text>
@@ -2782,7 +2895,11 @@ function ImportedArticleRow({
           hasActiveTaggingTask={hasActiveTaggingTask}
         />
         <ArticleTagsCell tags={tags} />
-        <ArticleDetailCell summary={summary} onEditSummary={onEditSummary} />
+        <ArticleDetailCell
+          summary={summary}
+          onEditSummary={onEditSummary}
+          onDeleteSummary={onDeleteSummary}
+        />
       </div>
     </div>
   );
@@ -2843,6 +2960,26 @@ function ImportedArticlesList({
 }) {
   const [editingSummary, setEditingSummary] =
     useState<DocumentTaxonomySummary | null>(null);
+  const [deletingSummary, setDeletingSummary] =
+    useState<DocumentTaxonomySummary | null>(null);
+  const [deletingArticle, setDeletingArticle] = useState(false);
+
+  const handleDeleteArticle = async () => {
+    if (!deletingSummary) {
+      return;
+    }
+
+    setDeletingArticle(true);
+    try {
+      await deleteImportedArticle(deletingSummary.document_id);
+      toast.success("文章已删除");
+      setDeletingSummary(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "文章删除失败");
+    } finally {
+      setDeletingArticle(false);
+    }
+  };
 
   return (
     <>
@@ -2851,36 +2988,44 @@ function ImportedArticlesList({
           <div className="border-b border-border-01 px-4 py-4">
             <ArticleListHeader count={summaries.length} />
           </div>
-          <div
-            className="grid items-center gap-3 border-b border-border-01 bg-background-tint-01 px-4 py-2.5"
-            style={{ gridTemplateColumns: IMPORTED_ARTICLES_GRID_COLUMNS }}
-          >
-            <div className="flex justify-center">
+          <div className="border-b border-border-01 bg-background-tint-01 px-4 py-2.5">
+            <div
+              className="grid w-full items-center gap-3"
+              style={{ gridTemplateColumns: IMPORTED_ARTICLES_GRID_COLUMNS }}
+            >
+              <div className="flex justify-start">
+                <Text font="figure-small-label" color="text-03">
+                  序号
+                </Text>
+              </div>
               <Text font="figure-small-label" color="text-03">
-                序号
+                文件名
               </Text>
-            </div>
-            <Text font="figure-small-label" color="text-03">
-              文件名
-            </Text>
-            <Text font="figure-small-label" color="text-03">
-              生成/更新时间
-            </Text>
-            <Text font="figure-small-label" color="text-03">
-              Summary
-            </Text>
-            <Text font="figure-small-label" color="text-03">
-              进度
-            </Text>
-            <div className="flex justify-center">
-              <Text font="figure-small-label" color="text-03">
-                标签
-              </Text>
-            </div>
-            <div className="flex justify-end">
-              <Text font="figure-small-label" color="text-03">
-                详情
-              </Text>
+              <div className="flex justify-center">
+                <Text font="figure-small-label" color="text-03">
+                  生成/更新时间
+                </Text>
+              </div>
+              <div className="flex justify-center">
+                <Text font="figure-small-label" color="text-03">
+                  Summary
+                </Text>
+              </div>
+              <div className="flex justify-center">
+                <Text font="figure-small-label" color="text-03">
+                  进度
+                </Text>
+              </div>
+              <div className="flex justify-center">
+                <Text font="figure-small-label" color="text-03">
+                  标签
+                </Text>
+              </div>
+              <div className="flex justify-end">
+                <Text font="figure-small-label" color="text-03">
+                  详情
+                </Text>
+              </div>
             </div>
           </div>
           {summaries.map((summary, index) => (
@@ -2890,6 +3035,7 @@ function ImportedArticlesList({
               summary={summary}
               hasActiveTaggingTask={hasActiveTaggingTask}
               onEditSummary={setEditingSummary}
+              onDeleteSummary={setDeletingSummary}
             />
           ))}
         </div>
@@ -2897,6 +3043,12 @@ function ImportedArticlesList({
       <SummaryEditorModal
         summary={editingSummary}
         onClose={() => setEditingSummary(null)}
+      />
+      <ArticleDeleteConfirmModal
+        summary={deletingSummary}
+        deleting={deletingArticle}
+        onClose={() => !deletingArticle && setDeletingSummary(null)}
+        onConfirm={handleDeleteArticle}
       />
     </>
   );
@@ -3801,7 +3953,8 @@ function useTaxonomyGenerationConfigEditor({
     }
   }, [config]);
 
-  const activeConfig = draftConfig || config || DEFAULT_TAXONOMY_GENERATION_CONFIG;
+  const activeConfig =
+    draftConfig || config || DEFAULT_TAXONOMY_GENERATION_CONFIG;
   const firstStageInitialCount =
     activeConfig.first_level_candidate_multiplier *
     activeConfig.first_level_max_count;
@@ -3809,9 +3962,7 @@ function useTaxonomyGenerationConfigEditor({
     activeConfig.third_level_candidate_multiplier *
     activeConfig.third_level_max_count;
 
-  const updateDraftConfig = (
-    patch: Partial<TaxonomyGenerationConfig>
-  ) => {
+  const updateDraftConfig = (patch: Partial<TaxonomyGenerationConfig>) => {
     setDraftConfig((current) => ({
       ...(current || activeConfig),
       ...patch,

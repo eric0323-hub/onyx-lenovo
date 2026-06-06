@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm import Session
 
 from onyx.configs.constants import DocumentSource
+from onyx.db.document import delete_documents_complete
 from onyx.db.enums import TaxonomyAssignmentStatus
 from onyx.db.enums import TaxonomyChangeType
 from onyx.db.enums import TaxonomyNodeLevel
@@ -34,6 +35,7 @@ from onyx.db.models import TaxonomyChangeRecord
 from onyx.db.models import TaxonomyNode
 from onyx.db.models import TaxonomyVersion
 from onyx.db.tag import create_or_add_document_tag_list
+from onyx.file_store.staging import delete_files_best_effort
 from onyx.taxonomy.constants import DEFAULT_TAXONOMY_NAME
 from onyx.taxonomy.constants import TAXONOMY_METADATA_L1_KEY
 from onyx.taxonomy.constants import TAXONOMY_METADATA_L2_KEY
@@ -647,7 +649,12 @@ def invalidate_active_document_taxonomy_tags(
         update(DocumentTaxonomyTag)
         .where(
             DocumentTaxonomyTag.document_id == document_id,
-            DocumentTaxonomyTag.status == TaxonomyAssignmentStatus.ACTIVE,
+            DocumentTaxonomyTag.status.in_(
+                [
+                    TaxonomyAssignmentStatus.ACTIVE,
+                    TaxonomyAssignmentStatus.TAGGING_FAILED,
+                ]
+            ),
         )
         .values(
             status=TaxonomyAssignmentStatus.NEEDS_RETAG,
@@ -709,8 +716,9 @@ def get_document_summaries(
         label_status_priority = {
             TaxonomyAssignmentStatus.ACTIVE: 0,
             TaxonomyAssignmentStatus.NEEDS_REVIEW: 1,
-            TaxonomyAssignmentStatus.NEEDS_RETAG: 2,
-            TaxonomyAssignmentStatus.DEPENDS_ON_DISABLED_LABEL: 3,
+            TaxonomyAssignmentStatus.TAGGING_FAILED: 2,
+            TaxonomyAssignmentStatus.NEEDS_RETAG: 3,
+            TaxonomyAssignmentStatus.DEPENDS_ON_DISABLED_LABEL: 4,
         }
         label_status_rows = db_session.execute(
             select(DocumentTaxonomyTag.document_id, DocumentTaxonomyTag.status).where(
@@ -758,6 +766,45 @@ def get_document_summaries(
                 )
             )
     return snapshots
+
+
+def get_imported_taxonomy_article(
+    db_session: Session,
+    *,
+    document_id: str,
+) -> Document:
+    document = db_session.get(Document, document_id)
+    if document is None:
+        raise ValueError("文章不存在")
+
+    if not (document.doc_metadata or {}).get("taxonomy_article_import"):
+        raise ValueError("只能删除文章导入列表中的文章")
+
+    return document
+
+
+def _get_imported_taxonomy_article_file_id(document: Document) -> str | None:
+    file_id = (document.doc_metadata or {}).get("taxonomy_article_file_id")
+    if not isinstance(file_id, str) or not file_id:
+        return None
+    if file_id == document.file_id:
+        return None
+    return file_id
+
+
+def delete_imported_taxonomy_article(
+    db_session: Session,
+    *,
+    document_id: str,
+) -> None:
+    document = get_imported_taxonomy_article(db_session, document_id=document_id)
+    imported_file_id = _get_imported_taxonomy_article_file_id(document)
+    delete_documents_complete(db_session, [document_id])
+    if imported_file_id is not None:
+        delete_files_best_effort(
+            [imported_file_id],
+            context="taxonomy article import cleanup",
+        )
 
 
 def get_document_ids_missing_complete_summary(

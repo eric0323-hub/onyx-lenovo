@@ -10,6 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm import Session
 
+from onyx.configs.app_configs import TAXONOMY_AUTO_TAGGING_ENABLE_OPTIMIZATION
+from onyx.configs.app_configs import TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD
 from onyx.db.enums import TaxonomyAssignmentStatus
 from onyx.db.enums import TaxonomyCandidateStatus
 from onyx.db.enums import TaxonomyNodeLevel
@@ -63,7 +65,7 @@ def run_summary_tagging_if_possible(
             request=StartTaggingRequest(
                 document_ids=document_ids,
                 source=TaxonomyTaggingSource.SUMMARY,
-                enable_optimization=False,
+                enable_optimization=TAXONOMY_AUTO_TAGGING_ENABLE_OPTIMIZATION,
                 limit=len(document_ids),
             ),
             created_by_user_id=created_by_user_id,
@@ -336,6 +338,29 @@ def _active_tag_count_for_document(db_session: Session, *, document_id: str) -> 
     )
 
 
+def _has_successful_taxonomy_tag(
+    db_session: Session,
+    *,
+    document_id: str,
+    task_id: int,
+) -> bool:
+    return (
+        db_session.scalar(
+            select(func.count(DocumentTaxonomyTag.id)).where(
+                DocumentTaxonomyTag.document_id == document_id,
+                DocumentTaxonomyTag.task_id == task_id,
+                DocumentTaxonomyTag.status.in_(
+                    [
+                        TaxonomyAssignmentStatus.ACTIVE,
+                        TaxonomyAssignmentStatus.NEEDS_REVIEW,
+                    ]
+                ),
+            )
+        )
+        or 0
+    ) > 0
+
+
 def _add_task_generated_tag(
     *,
     db_session: Session,
@@ -367,6 +392,37 @@ def _add_task_generated_tag(
             model_info=None,
             review_status=TaxonomyReviewStatus.UNCONFIRMED,
             status=TaxonomyAssignmentStatus.ACTIVE,
+        )
+    )
+
+
+def _add_tagging_failed_marker(
+    *,
+    db_session: Session,
+    document_id: str,
+    version_id: int,
+    task_id: int,
+    failure_reason: str,
+    tagging_source_content: str,
+) -> None:
+    db_session.add(
+        DocumentTaxonomyTag(
+            document_id=document_id,
+            leaf_node_id=None,
+            version_id=version_id,
+            task_id=task_id,
+            full_path_snapshot="打标签失败",
+            confidence=0,
+            source=TaxonomyTagSource.AI_RECOMMENDED,
+            is_primary=False,
+            sort_order=0,
+            evidence=None,
+            unmatched_reason=failure_reason,
+            tagging_source_content=tagging_source_content,
+            prompt_version=TAXONOMY_PROMPT_VERSION,
+            model_info=None,
+            review_status=TaxonomyReviewStatus.UNCONFIRMED,
+            status=TaxonomyAssignmentStatus.TAGGING_FAILED,
         )
     )
 
@@ -680,6 +736,7 @@ def run_tagging_task(
     leaf_by_id = {node.id: node for node in leaf_nodes}
     candidate_labels: list[TaxonomyCandidateLabel] = []
     document_content_by_id: dict[str, str] = {}
+    failed_document_ids: set[str] = set()
 
     for document in documents:
         try:
@@ -724,7 +781,10 @@ def run_tagging_task(
                         review_status=TaxonomyReviewStatus.UNCONFIRMED,
                         status=(
                             TaxonomyAssignmentStatus.ACTIVE
-                            if recommendation.confidence >= 0.5
+                            if (
+                                recommendation.confidence
+                                >= TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD
+                            )
                             else TaxonomyAssignmentStatus.NEEDS_REVIEW
                         ),
                     )
@@ -750,6 +810,15 @@ def run_tagging_task(
             logger.exception("Failed to taxonomy-tag document %s", document.id)
             task.failed_docs += 1
             task.error_message = str(e)
+            failed_document_ids.add(document.id)
+            _add_tagging_failed_marker(
+                db_session=db_session,
+                document_id=document.id,
+                version_id=version.id,
+                task_id=task.id,
+                failure_reason=str(e),
+                tagging_source_content=document_content_by_id.get(document.id, ""),
+            )
 
     try:
         _process_candidate_labels_after_batch(
@@ -762,6 +831,27 @@ def run_tagging_task(
             llm=llm,
         )
         db_session.flush()
+        for document_id, content in document_content_by_id.items():
+            if document_id in failed_document_ids:
+                continue
+            if _has_successful_taxonomy_tag(
+                db_session,
+                document_id=document_id,
+                task_id=task.id,
+            ):
+                continue
+            failed_document_ids.add(document_id)
+            task.failed_docs += 1
+            reason = "未匹配到可用标签，需要人工处理"
+            task.error_message = task.error_message or reason
+            _add_tagging_failed_marker(
+                db_session=db_session,
+                document_id=document_id,
+                version_id=version.id,
+                task_id=task.id,
+                failure_reason=reason,
+                tagging_source_content=content,
+            )
         for document_id in set(document_content_by_id):
             project_taxonomy_tags_to_document_metadata(
                 db_session,
@@ -769,8 +859,21 @@ def run_tagging_task(
             )
     except Exception as e:
         logger.exception("Failed to process taxonomy candidate labels for task %s", task.id)
-        task.failed_docs += len({candidate.document_id for candidate in candidate_labels})
+        failed_candidate_document_ids = {
+            candidate.document_id for candidate in candidate_labels
+        }
+        task.failed_docs += len(failed_candidate_document_ids)
         task.error_message = str(e)
+        for document_id in failed_candidate_document_ids:
+            failed_document_ids.add(document_id)
+            _add_tagging_failed_marker(
+                db_session=db_session,
+                document_id=document_id,
+                version_id=version.id,
+                task_id=task.id,
+                failure_reason=str(e),
+                tagging_source_content=document_content_by_id.get(document_id, ""),
+            )
 
     task.completed_at = datetime.now(timezone.utc)
     task.status = (

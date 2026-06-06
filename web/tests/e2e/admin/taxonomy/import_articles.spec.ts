@@ -127,7 +127,10 @@ async function openImportsPage(page: Page) {
   );
 }
 
-async function chooseArticleFile(page: Page, args: { name: string; body: string }) {
+async function chooseArticleFile(
+  page: Page,
+  args: { name: string; body: string }
+) {
   const fileChooserPromise = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "选择文件", exact: true }).click();
   const fileChooser = await fileChooserPromise;
@@ -155,7 +158,9 @@ test.describe("Taxonomy article import upload", () => {
     });
 
     await openImportsPage(page);
-    await expect(page.getByText("需先启用标签体系", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("需先启用标签体系", { exact: true })
+    ).toBeVisible();
 
     await page.getByRole("button", { name: "导入文章", exact: true }).click();
     await expect(
@@ -223,30 +228,96 @@ test.describe("Taxonomy article import upload", () => {
       name: IMPORTED_FILE_NAME,
       body: "# 文章管理上传测试\n\n这是一篇用于验证导入链路的 Markdown 文章。",
     });
-    await expect(dialog.getByText("1 个文件已选择", { exact: true })).toBeVisible();
-    await expect(dialog.getByText(IMPORTED_FILE_NAME, { exact: true })).toBeVisible();
+    await expect(
+      dialog.getByText("1 个文件已选择", { exact: true })
+    ).toBeVisible();
+    await expect(
+      dialog.getByText(IMPORTED_FILE_NAME, { exact: true })
+    ).toBeVisible();
 
     await dialog
       .getByRole("button", { name: "上传并处理", exact: true })
       .click();
 
-    await expect(page.getByText("已上传 1 个文件", { exact: true })).toBeVisible();
-    await expect(page.getByText("后台正在接收文章", { exact: true })).toBeVisible();
-    await expect(page.getByText("上传完成后会在这里显示处理进度")).toBeVisible();
+    await expect(
+      page.getByText("已上传 1 个文件", { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByText("后台正在接收文章", { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByText("上传完成后会在这里显示处理进度")
+    ).toBeVisible();
     await expect(page.getByRole("dialog")).toBeHidden();
 
     expect(uploadRequests).toHaveLength(1);
     expect(uploadRequests[0]!.contentType).toContain("multipart/form-data");
     expect(uploadRequests[0]!.body).toContain('name="files"');
-    expect(uploadRequests[0]!.body).toContain(`filename="${IMPORTED_FILE_NAME}"`);
-    expect(uploadRequests[0]!.body).toContain("这是一篇用于验证导入链路的 Markdown 文章");
+    expect(uploadRequests[0]!.body).toContain(
+      `filename="${IMPORTED_FILE_NAME}"`
+    );
+    expect(uploadRequests[0]!.body).toContain(
+      "这是一篇用于验证导入链路的 Markdown 文章"
+    );
 
-    await expect(page.getByText(IMPORTED_FILE_NAME, { exact: true })).toBeVisible();
+    await expect(
+      page.getByText(IMPORTED_FILE_NAME, { exact: true })
+    ).toBeVisible();
     await expect(page.getByText("入库文章", { exact: true })).toBeVisible();
     await expect(page.getByText("1 篇", { exact: true })).toBeVisible();
-    await expect(page.getByText("文章列表 / 详情区", { exact: true })).toBeVisible();
-    await expect(page.getByText("正在总结", { exact: true })).toHaveCount(2);
-    await expect(page.getByText("大模型正在生成文章 Summary")).toBeVisible();
+    await expect(
+      page.getByText("文章列表 / 详情区", { exact: true })
+    ).toBeVisible();
+    await expect(page.getByText("正在总结", { exact: true })).toBeVisible();
+    await expect(page.getByText("35%", { exact: true })).toBeVisible();
+  });
+
+  test("deletes an imported article from the processing list", async ({
+    page,
+  }) => {
+    let deleted = false;
+    const deletedArticleIds: string[] = [];
+
+    await page.route("**/api/admin/taxonomy/dashboard", async (route) => {
+      await route.fulfill(
+        jsonResponse(
+          deleted ? activeTaxonomyDashboard() : dashboardWithImportedArticle()
+        )
+      );
+    });
+    await page.route("**/api/admin/taxonomy/articles/**", async (route) => {
+      if (route.request().method() !== "DELETE") {
+        await route.fallback();
+        return;
+      }
+
+      deleted = true;
+      deletedArticleIds.push(route.request().url().split("/").pop() ?? "");
+      await route.fulfill(
+        jsonResponse({ status: "ok", deleted: IMPORTED_DOCUMENT_ID })
+      );
+    });
+
+    await openImportsPage(page);
+    await expect(
+      page.getByText(IMPORTED_FILE_NAME, { exact: true })
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "删除文章", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("删除后会从文章导入列表");
+    await expect(dialog).toContainText(IMPORTED_FILE_NAME);
+
+    await dialog.getByRole("button", { name: "删除", exact: true }).click();
+
+    await expect(page.getByText("文章已删除", { exact: true })).toBeVisible();
+    await expect(page.getByText("暂无导入文章", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText(IMPORTED_FILE_NAME, { exact: true })
+    ).toBeHidden();
+    expect(deletedArticleIds).toEqual([
+      encodeURIComponent(IMPORTED_DOCUMENT_ID),
+    ]);
   });
 
   test("surfaces unsupported article file upload errors", async ({ page }) => {
@@ -255,7 +326,9 @@ test.describe("Taxonomy article import upload", () => {
     });
 
     await page.route("**/api/admin/taxonomy/articles/import", async (route) => {
-      await route.fulfill(jsonResponse({ detail: "仅支持 Markdown 和 PDF 文件" }, 400));
+      await route.fulfill(
+        jsonResponse({ detail: "仅支持 Markdown 和 PDF 文件" }, 400)
+      );
     });
 
     await openImportsPage(page);
@@ -266,7 +339,9 @@ test.describe("Taxonomy article import upload", () => {
       name: "unsupported.docx",
       body: "not a supported article import format",
     });
-    await expect(dialog.getByText("unsupported.docx", { exact: true })).toBeVisible();
+    await expect(
+      dialog.getByText("unsupported.docx", { exact: true })
+    ).toBeVisible();
 
     await dialog
       .getByRole("button", { name: "上传并处理", exact: true })

@@ -414,6 +414,32 @@ INDEX_BATCH_SIZE = int(os.environ.get("INDEX_BATCH_SIZE") or 16)
 
 MAX_DRIVE_WORKERS = int(os.environ.get("MAX_DRIVE_WORKERS", 4))
 
+TAXONOMY_AUTO_TAGGING_ENABLE_OPTIMIZATION = (
+    os.environ.get("TAXONOMY_AUTO_TAGGING_ENABLE_OPTIMIZATION", "true").lower()
+    == "true"
+)
+TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD_DEFAULT = 0.7
+_raw_taxonomy_tag_confidence_active_threshold = os.environ.get(
+    "TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD",
+    str(TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD_DEFAULT),
+)
+try:
+    TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD = float(
+        _raw_taxonomy_tag_confidence_active_threshold
+    )
+    if not 0 <= TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD <= 1:
+        raise ValueError
+except ValueError:
+    logger.warning(
+        "TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD=%s must be a number between 0 and 1; "
+        "falling back to %.1f",
+        _raw_taxonomy_tag_confidence_active_threshold,
+        TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD_DEFAULT,
+    )
+    TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD = (
+        TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD_DEFAULT
+    )
+
 # Below are intended to match the env variables names used by the official postgres docker image
 # https://hub.docker.com/_/postgres
 POSTGRES_USER = os.environ.get("POSTGRES_USER") or "postgres"

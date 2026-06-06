@@ -24,16 +24,20 @@ from onyx.db.enums import TaxonomyVersionSource
 from onyx.db.models import DocumentTaxonomyTag
 from onyx.db.models import Taxonomy
 from onyx.db.models import TaxonomyTaggingTask
+from onyx.db.search_settings import get_active_search_settings
 from onyx.db.taxonomy import activate_taxonomy_version
 from onyx.db.taxonomy import create_taxonomy_version_from_tree
+from onyx.db.taxonomy import delete_imported_taxonomy_article
 from onyx.db.taxonomy import document_taxonomy_tag_snapshot
 from onyx.db.taxonomy import get_active_taxonomy
 from onyx.db.taxonomy import get_document_summaries
+from onyx.db.taxonomy import get_imported_taxonomy_article
 from onyx.db.taxonomy import get_taxonomy_coverage
 from onyx.db.taxonomy import taxonomy_snapshot
 from onyx.db.taxonomy import taxonomy_version_snapshot
 from onyx.db.taxonomy_generation_config import get_taxonomy_generation_config
 from onyx.db.taxonomy_generation_config import set_taxonomy_generation_config
+from onyx.document_index.factory import get_all_document_indices
 from onyx.error_handling.error_codes import OnyxErrorCode
 from onyx.error_handling.exceptions import OnyxError
 from onyx.file_store.file_store import get_default_file_store
@@ -65,6 +69,12 @@ from onyx.taxonomy.service import update_manual_summary
 from shared_configs.contextvars import get_current_tenant_id
 
 router = APIRouter(prefix="/admin/taxonomy")
+
+
+def _imported_article_error_code(error: ValueError) -> OnyxErrorCode:
+    if str(error) == "文章不存在":
+        return OnyxErrorCode.NOT_FOUND
+    return OnyxErrorCode.INVALID_INPUT
 
 
 def _runtime_generation_config_from_template_config(
@@ -384,6 +394,46 @@ def update_summary(
     except ValueError as e:
         db_session.rollback()
         raise OnyxError(OnyxErrorCode.NOT_FOUND, str(e)) from e
+
+
+@router.delete("/articles/{document_id}", dependencies=[Depends(require_vector_db)])
+def delete_imported_article(
+    document_id: str,
+    _: object = Depends(require_permission(Permission.FULL_ADMIN_PANEL_ACCESS)),
+    db_session: Session = Depends(get_session),
+) -> dict[str, str]:
+    try:
+        document = get_imported_taxonomy_article(
+            db_session,
+            document_id=document_id,
+        )
+    except ValueError as e:
+        raise OnyxError(_imported_article_error_code(e), str(e)) from e
+
+    active_search_settings = get_active_search_settings(db_session)
+    document_indices = get_all_document_indices(
+        active_search_settings.primary,
+        active_search_settings.secondary,
+        None,
+    )
+    try:
+        for document_index in document_indices:
+            document_index.delete(
+                document_id,
+                chunk_count=document.chunk_count,
+            )
+        delete_imported_taxonomy_article(
+            db_session,
+            document_id=document_id,
+        )
+    except ValueError as e:
+        db_session.rollback()
+        raise OnyxError(_imported_article_error_code(e), str(e)) from e
+    except Exception as e:
+        db_session.rollback()
+        raise OnyxError(OnyxErrorCode.INTERNAL_ERROR, str(e)) from e
+
+    return {"status": "ok", "deleted": document_id}
 
 
 @router.post("/tagging/run")

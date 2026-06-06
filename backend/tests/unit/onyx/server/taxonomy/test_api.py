@@ -1,4 +1,5 @@
 from io import BytesIO
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -10,6 +11,8 @@ from onyx.configs.constants import OnyxCeleryPriority
 from onyx.configs.constants import OnyxCeleryQueues
 from onyx.configs.constants import OnyxCeleryTask
 from onyx.db import taxonomy_generation_config
+from onyx.error_handling.error_codes import OnyxErrorCode
+from onyx.error_handling.exceptions import OnyxError
 from onyx.server.taxonomy import api
 from onyx.taxonomy.models import GenerateTaxonomyDraftRequest
 from onyx.taxonomy.models import TaxonomyGenerationConfig
@@ -52,6 +55,15 @@ class _FakeKvStore:
     def store(self, _key: str, val: object, encrypt: bool = False) -> None:
         _ = encrypt
         self.stored = val
+
+
+class _FakeDocumentIndex:
+    def __init__(self) -> None:
+        self.deleted: list[tuple[str, int | None]] = []
+
+    def delete(self, document_id: str, chunk_count: int | None = None) -> int:
+        self.deleted.append((document_id, chunk_count))
+        return 1
 
 
 def _upload_file(name: str, content_type: str = "text/markdown") -> UploadFile:
@@ -180,3 +192,89 @@ def test_generate_draft_prefers_request_generation_config(
 
     assert response.nodes == []
     assert used_configs == [request_config]
+
+
+def test_delete_imported_article_deletes_indices_and_db(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = SimpleNamespace(id="taxonomy_article__stored-1", chunk_count=3)
+    document_index = _FakeDocumentIndex()
+    deleted_document_ids: list[str] = []
+
+    def get_imported_taxonomy_article(
+        _db_session: object,
+        document_id: str,
+    ) -> SimpleNamespace:
+        assert document_id == document.id
+        return document
+
+    def get_active_search_settings(_db_session: object) -> SimpleNamespace:
+        return SimpleNamespace(primary=None, secondary=None)
+
+    def get_all_document_indices(
+        _primary: object,
+        _secondary: object,
+        _deployment_name: object,
+    ) -> list[_FakeDocumentIndex]:
+        return [document_index]
+
+    def delete_imported_taxonomy_article(
+        _db_session: object,
+        document_id: str,
+    ) -> None:
+        deleted_document_ids.append(document_id)
+
+    monkeypatch.setattr(
+        api,
+        "get_imported_taxonomy_article",
+        get_imported_taxonomy_article,
+    )
+    monkeypatch.setattr(
+        api,
+        "get_active_search_settings",
+        get_active_search_settings,
+    )
+    monkeypatch.setattr(
+        api,
+        "get_all_document_indices",
+        get_all_document_indices,
+    )
+    monkeypatch.setattr(
+        api,
+        "delete_imported_taxonomy_article",
+        delete_imported_taxonomy_article,
+    )
+
+    response = api.delete_imported_article(
+        document_id=document.id,
+        db_session=SimpleNamespace(rollback=lambda: None),
+    )
+
+    assert response == {"status": "ok", "deleted": document.id}
+    assert document_index.deleted == [(document.id, 3)]
+    assert deleted_document_ids == [document.id]
+
+
+def test_delete_imported_article_rejects_non_imported_document(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def get_imported_taxonomy_article(
+        _db_session: object,
+        document_id: str,
+    ) -> None:
+        assert document_id == "regular-doc"
+        raise ValueError("只能删除文章导入列表中的文章")
+
+    monkeypatch.setattr(
+        api,
+        "get_imported_taxonomy_article",
+        get_imported_taxonomy_article,
+    )
+
+    with pytest.raises(OnyxError) as exc_info:
+        api.delete_imported_article(
+            document_id="regular-doc",
+            db_session=SimpleNamespace(rollback=lambda: None),
+        )
+
+    assert exc_info.value.error_code == OnyxErrorCode.INVALID_INPUT

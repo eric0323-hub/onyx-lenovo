@@ -51,7 +51,8 @@ export type TaxonomyAssignmentStatus =
   | "stale"
   | "needs_review"
   | "needs_retag"
-  | "depends_on_disabled_label";
+  | "depends_on_disabled_label"
+  | "tagging_failed";
 export type TaxonomyArticleLabelStatus = Exclude<
   TaxonomyAssignmentStatus,
   "stale"

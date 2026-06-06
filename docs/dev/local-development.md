@@ -211,6 +211,10 @@ COMPOSE_PROFILES=s3-filestore,code-interpreter docker-compose -f docker-compose.
   relational_db cache opensearch inference_model_server indexing_model_server minio code-interpreter background
 ```
 
+Docker `background` 是完整后台容器，会通过 `supervisord` 启动 primary、light、heavy、docprocessing、
+docfetching、monitoring、user file processing、scheduled tasks 和 beat。它适合验证接近完整 compose 的
+异步链路；但它运行的是容器镜像里的 backend 代码，通常不会读取宿主机工作区里的改动。
+
 不要同时运行 Docker `background` 和本机 Celery workers，除非你明确知道它们会共同消费同一个 Redis broker。
 否则同一类任务可能被不同代码版本的 worker 消费，调试结果会变得不确定。
 
@@ -286,6 +290,7 @@ http://127.0.0.1:8080
 ### 3. 启动本机后台任务
 
 本机后端只处理同步 API 请求。凡是通过 Celery 投递的任务，都需要后台 worker 常驻运行。
+本地开发 backend 或 Celery 逻辑时，推荐用本机 worker，因为它读取当前工作区代码，不需要 rebuild Docker 镜像。
 
 ```bash
 cd backend
@@ -309,6 +314,21 @@ docker exec onyx-cache-1 redis-cli -n 15 llen taxonomy_processing:1
 ```
 
 返回非 `0` 通常表示没有 worker 正在消费高优先级 taxonomy 任务，或 worker 启动失败。
+
+检查当前是否真的有 Celery worker 响应：
+
+```bash
+cd backend
+uv run python -m dotenv -f ../.vscode/.env run -- \
+  celery -A onyx.background.celery.versioned_apps.heavy inspect ping --timeout=3
+```
+
+如果返回 `No nodes replied within time constraint`，说明当前没有可用 Celery worker。再用下面命令确认
+Docker `background` 是否在运行：
+
+```bash
+docker ps --format '{{.Names}}\t{{.Status}}' | grep onyx-background
+```
 
 ### 4. 启动本机前端
 
@@ -449,7 +469,16 @@ POSTGRES_HOST_PORT=15433
 
 ### 修改 Celery worker 后没有生效
 
-Celery worker 没有自动热重载。修改 worker 代码后，需要重启对应 Celery worker 或相关容器。
+Celery worker 没有自动热重载。修改 worker 代码后，需要重启对应 Celery worker。
+
+- 如果用本机 `scripts/dev_run_background_jobs.py` 启动 worker，停止脚本后重新运行即可。
+- 如果用 Docker `background` 启动 worker，`restart background` 只会重启容器里的旧镜像代码；本地源码改动不会自动进入容器。
+- 需要验证本地 backend/Celery 改动时，优先用本机 worker；需要验证完整 compose 镜像时，重新 build/recreate：
+
+```bash
+cd deployment/docker_compose
+COMPOSE_PROFILES=s3-filestore,code-interpreter docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build background
+```
 
 ### 文章导入一直显示 35%
 

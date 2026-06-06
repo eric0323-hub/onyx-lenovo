@@ -74,6 +74,7 @@ import {
   TaxonomyTaggingTask,
   TaxonomyVersion,
 } from "./types";
+import { useExpiringTaxonomyImportPoll } from "./useExpiringTaxonomyImportPoll";
 
 interface TaxonomyTreeDataNode {
   key: string;
@@ -122,7 +123,6 @@ type TaxonomyNodeListField =
 const TAXONOMY_GENERATION_STORAGE_KEY =
   "onyx.taxonomy.templateDraft.generation.v1";
 const TAXONOMY_DASHBOARD_POLL_INTERVAL_MS = 3000;
-const TAXONOMY_IMPORT_POST_UPLOAD_POLL_MS = 60_000;
 
 function readPersistedTaxonomyGeneration(): PersistedTaxonomyGenerationState | null {
   if (typeof window === "undefined") {
@@ -3318,10 +3318,9 @@ export function TaxonomyTemplateDraftPage() {
 }
 
 export function TaxonomyImportsPage() {
-  const [queuedPollUntil, setQueuedPollUntil] = useState<number | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
-  const queuedPollActive =
-    queuedPollUntil !== null && Date.now() < queuedPollUntil;
+  const { queuedPollActive, startQueuedPoll, stopQueuedPoll } =
+    useExpiringTaxonomyImportPoll();
   const dashboard = useTaxonomyDashboard(queuedPollActive);
   const hasActiveTaxonomy = Boolean(dashboard?.taxonomy?.active_version_id);
   const latestTask = getLatestImportTask(dashboard?.recent_tasks);
@@ -3335,20 +3334,14 @@ export function TaxonomyImportsPage() {
   }
 
   useEffect(() => {
-    if (!queuedPollUntil) {
-      return;
+    if (taxonomyDashboardHasActiveProcessing(dashboard)) {
+      stopQueuedPoll();
     }
-    if (
-      Date.now() >= queuedPollUntil ||
-      taxonomyDashboardHasActiveProcessing(dashboard)
-    ) {
-      setQueuedPollUntil(null);
-    }
-  }, [dashboard, queuedPollUntil]);
+  }, [dashboard, stopQueuedPoll]);
 
   const handleImportQueued = useCallback(() => {
-    setQueuedPollUntil(Date.now() + TAXONOMY_IMPORT_POST_UPLOAD_POLL_MS);
-  }, []);
+    startQueuedPoll();
+  }, [startQueuedPoll]);
 
   const handleImportArticles = () => {
     if (!dashboard) {

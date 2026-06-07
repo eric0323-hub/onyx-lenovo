@@ -1,0 +1,800 @@
+{
+  "testset_id": "main-qwen-v1",
+  "description": "Seed golden test set for Qwen-generated 3C support QA evaluation from three docs/main Markdown files.",
+  "language": "zh-CN questions with English product names and part numbers preserved from source documents.",
+  "designed_for_model": "openai/qwen3.7-max",
+  "source_files": [
+    "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+    "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md",
+    "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md"
+  ],
+  "cases": [
+    {
+      "id": "main-qwen-v1-001",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md"
+      ],
+      "case_type": "fact_lookup",
+      "difficulty": "easy",
+      "question": "4X20E50574 是哪款电源适配器？它适合什么电源接口？",
+      "expected_answer": "4X20E50574 是 ThinkPad 170W AC Adapter (slim tip)。它适用于带矩形 slim tip 通用电源插头的 ThinkPad，不兼容圆形 barrel-type 电源插头。",
+      "expected_terms": [
+        "ThinkPad 170W AC Adapter",
+        "slim tip",
+        "4X20E50574",
+        "rectangular",
+        "not compatible",
+        "round"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+          "heading_path": [
+            "Features and specifications"
+          ],
+          "quote": "ThinkPad 170WAC Adapter (slim tip) (4X20E50574)"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+          "heading_path": [
+            "Features and specifications"
+          ],
+          "quote": "Compatible with ThinkPad laptops with rectangular slim tip common power plug"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "ThinkPad 170W AC Adapter",
+          "slim tip",
+          "4X20E50574",
+          "not compatible with round barrel-type plug"
+        ],
+        "must_not_include": [
+          "USB-C",
+          "round barrel compatible"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-002",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md"
+      ],
+      "case_type": "fact_lookup",
+      "difficulty": "easy",
+      "question": "ThinkPad 170W slim tip 适配器的交流输入电压和频率是多少？",
+      "expected_answer": "它支持 100 V 到 240 V 的交流输入电压，频率为 50/60 Hz。",
+      "expected_terms": [
+        "100 V",
+        "240 V",
+        "50/60 Hz"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+          "heading_path": [
+            "Features and specifications",
+            "Performance specifications"
+          ],
+          "quote": "AC input voltage: 100 V to 240 V; 50/60 Hz"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "100 V to 240 V",
+          "50/60 Hz"
+        ],
+        "must_not_include": [
+          "110 V only",
+          "220 V only"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-003",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md"
+      ],
+      "case_type": "table_lookup",
+      "difficulty": "medium",
+      "question": "在美国、加拿大、墨西哥等地区购买 170W slim tip 适配器时，marketing part number 和 AC adapter service part number 分别是什么？",
+      "expected_answer": "这些地区的 marketing part number 是 4X20E50574，AC Power Adapter service part number 是 45N0372。电源线 service part number 是 42T5008 或 42T5093。",
+      "expected_terms": [
+        "4X20E50574",
+        "45N0372",
+        "42T5008",
+        "42T5093"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+          "heading_path": [
+            "Service Part and Part Numbers"
+          ],
+          "quote": "U.S., Canada, Mexico, Colombia, Panama, Peru, Ecuador | 4X20E50574 | 45N0372"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "4X20E50574",
+          "45N0372",
+          "42T5008 or 42T5093"
+        ],
+        "must_not_include": [
+          "0A36258",
+          "45N0256"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-004",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md"
+      ],
+      "case_type": "fact_lookup",
+      "difficulty": "easy",
+      "question": "ThinkPad 170W AC Adapter (slim tip) 的尺寸和重量是多少？",
+      "expected_answer": "它的近似尺寸为高 30 mm、宽 76 mm、长 155 mm，重量约 600 g。",
+      "expected_terms": [
+        "30 mm",
+        "76 mm",
+        "155 mm",
+        "600 g"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+          "heading_path": [
+            "Features and specifications",
+            "Physical specifications"
+          ],
+          "quote": "Approximate height: 30 mm"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+          "heading_path": [
+            "Features and specifications",
+            "Physical specifications"
+          ],
+          "quote": "Weight: 600 g"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "30 mm",
+          "76 mm",
+          "155 mm",
+          "600 g"
+        ],
+        "must_not_include": [
+          "235 g",
+          "105 mm"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-005",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md"
+      ],
+      "case_type": "fact_lookup",
+      "difficulty": "easy",
+      "question": "0A36258 是哪款适配器？包装里包含哪些东西？",
+      "expected_answer": "0A36258 是 ThinkPad 65W AC Adapter (slim tip)。包装包含 Lenovo 65W AC Adapter、用户指南和 AC power cord。",
+      "expected_terms": [
+        "ThinkPad 65W AC Adapter",
+        "0A36258",
+        "User's guide",
+        "AC power cord"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md",
+          "heading_path": [
+            "Features and specifications"
+          ],
+          "quote": "ThinkPad 65W AC Adapter (slim tip) (0A36258)"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md",
+          "heading_path": [
+            "Packaging"
+          ],
+          "quote": "Lenovo 65W AC Adapter"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "ThinkPad 65W AC Adapter",
+          "0A36258",
+          "User's guide",
+          "AC power cord"
+        ],
+        "must_not_include": [
+          "170W",
+          "4X20E50574"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-006",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md"
+      ],
+      "case_type": "fact_lookup",
+      "difficulty": "easy",
+      "question": "ThinkPad 65W slim tip 适配器是否兼容老款圆形电源接口的笔记本？",
+      "expected_answer": "不兼容。文档说明它兼容 2013 Lenovo notebooks 的矩形 slim tip 通用电源插头，不兼容带圆形 barrel-type 电源插头的 legacy notebook systems。",
+      "expected_terms": [
+        "not compatible",
+        "legacy notebook systems",
+        "round",
+        "barrel-type",
+        "rectangular slim tip"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md",
+          "heading_path": [
+            "Features and specifications"
+          ],
+          "quote": "Not compatible with legacy notebook systems with the round, barrel-type power plug"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "not compatible",
+          "round barrel-type",
+          "rectangular slim tip"
+        ],
+        "must_not_include": [
+          "compatible with round plug",
+          "USB-C"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-007",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md"
+      ],
+      "case_type": "table_lookup",
+      "difficulty": "medium",
+      "question": "Mainland China 地区的 65W slim tip 适配器 marketing part number 和 service part number 是什么？",
+      "expected_answer": "Mainland China 地区的 65W slim tip 适配器 marketing part number 是 0A36272，65W AC Adapter Service part number 是 45N0254，电源线 service part number 是 42T5065 或 42T5150。",
+      "expected_terms": [
+        "Mainland China",
+        "0A36272",
+        "45N0254",
+        "42T5065",
+        "42T5150"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md",
+          "heading_path": [
+            "Service Parts"
+          ],
+          "quote": "Mainland China | 0A36272 | 45N0254"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "0A36272",
+          "45N0254",
+          "42T5065 or 42T5150"
+        ],
+        "must_not_include": [
+          "4X20E50588",
+          "45N0370"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-008",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md"
+      ],
+      "case_type": "multi_doc_compare",
+      "difficulty": "hard",
+      "question": "65W slim tip 和 170W slim tip 两款适配器哪个更轻？两者重量分别是多少？",
+      "expected_answer": "65W slim tip 更轻。65W 适配器约 235 g，170W 适配器约 600 g。",
+      "expected_terms": [
+        "65W",
+        "235 g",
+        "170W",
+        "600 g",
+        "lighter"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md",
+          "heading_path": [
+            "Features and specifications",
+            "Physical specifications"
+          ],
+          "quote": "Weight: 235 g"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+          "heading_path": [
+            "Features and specifications",
+            "Physical specifications"
+          ],
+          "quote": "Weight: 600 g"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "65W is lighter",
+          "235 g",
+          "600 g"
+        ],
+        "must_not_include": [
+          "170W is lighter"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-009",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md"
+      ],
+      "case_type": "multi_doc_compare",
+      "difficulty": "hard",
+      "question": "Mainland China 地区 170W 和 65W slim tip 适配器的 marketing part number 分别是什么？",
+      "expected_answer": "Mainland China 地区 170W slim tip 的 marketing part number 是 4X20E50588；65W slim tip 的 marketing part number 是 0A36272。",
+      "expected_terms": [
+        "Mainland China",
+        "170W",
+        "4X20E50588",
+        "65W",
+        "0A36272"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+          "heading_path": [
+            "Service Part and Part Numbers"
+          ],
+          "quote": "Mainland China | 4X20E50588 | 45N0370"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md",
+          "heading_path": [
+            "Service Parts"
+          ],
+          "quote": "Mainland China | 0A36272 | 45N0254"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "170W",
+          "4X20E50588",
+          "65W",
+          "0A36272"
+        ],
+        "must_not_include": [
+          "4X20E50574",
+          "0A36258"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-010",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md"
+      ],
+      "case_type": "multi_doc_compare",
+      "difficulty": "medium",
+      "question": "ThinkPad E470 是否同时出现在 65W 和 170W slim tip 适配器的兼容列表中？",
+      "expected_answer": "是。E470 同时出现在 170W slim tip 适配器和 65W slim tip 适配器的硬件兼容列表中。",
+      "expected_terms": [
+        "E470",
+        "170W",
+        "65W",
+        "hardware compatibility"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+          "heading_path": [
+            "Hardware compatibility"
+          ],
+          "quote": "E470"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md",
+          "heading_path": [
+            "Hardware compatibility"
+          ],
+          "quote": "E470"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "yes",
+          "E470",
+          "both 65W and 170W"
+        ],
+        "must_not_include": [
+          "only 65W",
+          "only 170W"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-011",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md"
+      ],
+      "case_type": "troubleshooting_flow",
+      "difficulty": "easy",
+      "question": "电脑显示屏没有画面时，文档建议首先检查什么？",
+      "expected_answer": "首先检查电源。确认 PC 有电源迹象，例如声音或指示灯，并确保电源线牢固连接到 PC 和电源插座。",
+      "expected_terms": [
+        "Check Power",
+        "power cable",
+        "power outlet",
+        "lights",
+        "indicators"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Check Power"
+          ],
+          "quote": "Make sure the PC has power"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Check Power"
+          ],
+          "quote": "Ensure that the power cable is securely plugged"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "check power first",
+          "power cable",
+          "power outlet"
+        ],
+        "must_not_include": [
+          "update driver first",
+          "factory reset first"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-012",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md"
+      ],
+      "case_type": "troubleshooting_flow",
+      "difficulty": "medium",
+      "question": "如果屏幕没有显示，但可以进入 BIOS 菜单，这通常说明什么？后续操作有什么风险提示？",
+      "expected_answer": "如果可以看到 BIOS 菜单，文档认为这表示电源供应大概率没有问题，可能是软件问题。可以在 BIOS 中寻找恢复默认或出厂设置的选项，但文档提醒这会擦除所有数据，需要先备份。",
+      "expected_terms": [
+        "BIOS menu",
+        "no problem with your power supply",
+        "software issue",
+        "erase all the data",
+        "backup"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Check for Logo or BIOS screen"
+          ],
+          "quote": "there is no problem with your power supply"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Check for Logo or BIOS screen"
+          ],
+          "quote": "This will erase all the data"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "power supply likely okay",
+          "software issue",
+          "erase all data",
+          "backup"
+        ],
+        "must_not_include": [
+          "hardware screen failure is confirmed",
+          "data is preserved"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-013",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md"
+      ],
+      "case_type": "troubleshooting_flow",
+      "difficulty": "medium",
+      "question": "使用外接显示器时没有画面，文档建议检查哪些连接相关事项？",
+      "expected_answer": "应确认 PC 到显示器使用了正确线缆，线缆没有松动，显示器电源线连接牢固；如果条件允许，可以尝试其他显示器或线缆，也可以把显示器接到另一台 PC 上测试。",
+      "expected_terms": [
+        "correct cables",
+        "not loose",
+        "power cable",
+        "different monitor",
+        "different PC"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Check cables if using an external monitor"
+          ],
+          "quote": "Make sure the correct cables are connected"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Check cables if using an external monitor"
+          ],
+          "quote": "Try connecting the monitor to a different PC"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "correct cable",
+          "not loose",
+          "monitor power cable",
+          "try different monitor or cable",
+          "different PC"
+        ],
+        "must_not_include": [
+          "replace motherboard immediately"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-014",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md"
+      ],
+      "case_type": "troubleshooting_flow",
+      "difficulty": "medium",
+      "question": "屏幕闪烁时，Windows 显示设置中可以尝试调整什么？",
+      "expected_answer": "可以尝试调整刷新率。文档路径是右键桌面进入 Display settings，再到 Advanced display settings、Display adapter properties for Display 1、Monitor 选项卡，选择显示器支持的刷新率。",
+      "expected_terms": [
+        "refresh rate",
+        "Display settings",
+        "Advanced display settings",
+        "Monitor tab"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Check Display Settings"
+          ],
+          "quote": "Some flickering issues may be resolved by changing the refresh rate"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "refresh rate",
+          "Monitor tab",
+          "supported by the monitor"
+        ],
+        "must_not_include": [
+          "change power adapter",
+          "factory reset"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-015",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md"
+      ],
+      "case_type": "troubleshooting_flow",
+      "difficulty": "medium",
+      "question": "如果显示问题是在最近驱动更新后出现的，文档建议如何回滚驱动？",
+      "expected_answer": "在 Windows 中打开 Device Manager，展开显示或显示器相关部分，右键驱动选择 Properties，进入 Driver 选项卡并在可用时选择 Roll Back Driver，然后重启 PC。如果 Roll Back Driver 是灰色，表示没有安装更早版本。",
+      "expected_terms": [
+        "Device Manager",
+        "Properties",
+        "Driver tab",
+        "Roll Back Driver",
+        "Reboot"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Update or Roll Back Drivers"
+          ],
+          "quote": "Right-click the driver and select Properties"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Update or Roll Back Drivers"
+          ],
+          "quote": "select Roll Back Driver if the option is available"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "Device Manager",
+          "Driver tab",
+          "Roll Back Driver",
+          "reboot"
+        ],
+        "must_not_include": [
+          "BIOS reset",
+          "delete all data"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-016",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md"
+      ],
+      "case_type": "troubleshooting_flow",
+      "difficulty": "easy",
+      "question": "如果显示问题只发生在某一个应用中，文档建议怎么判断？",
+      "expected_answer": "关闭该应用，尝试使用不同应用，看问题是否仍然出现。如果只在特定应用中出现，应检查该应用自己的显示设置，并向应用厂商确认是否有更新。",
+      "expected_terms": [
+        "specific application",
+        "close the application",
+        "try a different application",
+        "display settings",
+        "updates"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Try different applications"
+          ],
+          "quote": "close the application, and try a different application"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "close the application",
+          "try a different application",
+          "check app display settings",
+          "check updates"
+        ],
+        "must_not_include": [
+          "replace the monitor first"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-017",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md"
+      ],
+      "case_type": "unsupported_or_clarify",
+      "difficulty": "hard",
+      "question": "屏幕已经坏到不能正常使用了，文档能否确认一定免费保修？",
+      "expected_answer": "不能确认一定免费保修。文档只说如果屏幕无法支持正常活动，可能需要维修，并提供 Contact Us 获取支持或保修帮助；是否免费保修需要根据具体设备、保修状态和政策确认。",
+      "expected_terms": [
+        "cannot confirm",
+        "may require a repair",
+        "Contact Us",
+        "warranty help"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Get support or warranty help"
+          ],
+          "quote": "You may require a repair"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_25.md",
+          "heading_path": [
+            "Solution",
+            "Get support or warranty help"
+          ],
+          "quote": "Support Availability - Contact Us"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "cannot confirm free warranty",
+          "may require repair",
+          "contact support"
+        ],
+        "must_not_include": [
+          "definitely free",
+          "covered for all users"
+        ],
+        "requires_source": true
+      }
+    },
+    {
+      "id": "main-qwen-v1-018",
+      "source_files": [
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+        "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md"
+      ],
+      "case_type": "unsupported_or_clarify",
+      "difficulty": "hard",
+      "question": "ThinkPad X1 Carbon Gen 12 能否使用这两个 slim tip 适配器？",
+      "expected_answer": "这三份文档不能确认 ThinkPad X1 Carbon Gen 12 是否兼容。两个适配器文档都给出了已支持系统列表，并建议查看 Lenovo Smart Find、Accessories Lookup、Find your Battery or Power Adapter 或 Accessories Compatibility Guide 获取最新兼容性信息。",
+      "expected_terms": [
+        "cannot confirm",
+        "ThinkPad X1 Carbon Gen 12",
+        "Lenovo Smart Find",
+        "Accessories Lookup",
+        "latest updates"
+      ],
+      "evidence": [
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_23.md",
+          "heading_path": [
+            "Hardware compatibility"
+          ],
+          "quote": "For the latest updates on the compatible systems"
+        },
+        {
+          "source_file": "docs/main/10_01QSBR0OBSC2V1C4I0AM02LAES07C6V7_content_24.md",
+          "heading_path": [
+            "Hardware compatibility"
+          ],
+          "quote": "For the latest updates on the compatible systems"
+        }
+      ],
+      "grading": {
+        "must_include": [
+          "cannot confirm",
+          "not listed in these documents",
+          "check latest compatibility resources"
+        ],
+        "must_not_include": [
+          "definitely compatible",
+          "definitely incompatible"
+        ],
+        "requires_source": true
+      }
+    }
+  ]
+}

@@ -11,6 +11,7 @@ from onyx.context.search.models import SearchDoc
 from onyx.context.search.preprocessing.access_filters import (
     build_access_filters_for_user,
 )
+from onyx.context.search.retrieval.search_runner import combine_retrieval_results
 from onyx.db.engine.sql_engine import get_session
 from onyx.db.enums import Permission
 from onyx.db.models import User
@@ -25,6 +26,8 @@ from onyx.server.query_and_chat.models import TagResponse
 from onyx.server.settings.store import load_settings
 from onyx.server.utils_vector_db import require_vector_db
 from onyx.taxonomy.models import TaxonomySearchApplyTo
+from onyx.taxonomy.models import TaxonomySearchDecision
+from onyx.taxonomy.models import TaxonomySearchMode
 from onyx.taxonomy.models import TaxonomySearchRecommendedAction
 from onyx.taxonomy.search_matcher import match_taxonomy_query
 from onyx.utils.logger import setup_logger
@@ -48,24 +51,38 @@ def admin_search(
     logger.notice("Received admin search query: %s", query)
     user_acl_filters = build_access_filters_for_user(user, db_session)
     taxonomy_leaf_ids: list[str] | None = None
+    taxonomy_decision: TaxonomySearchDecision | None = None
+    taxonomy_filter_is_manual = False
     if question.filters.taxonomy_node_ids:
         taxonomy_leaf_ids = get_node_descendant_leaf_ids(
             db_session,
             node_ids=question.filters.taxonomy_node_ids,
             active_only=True,
         )
+        taxonomy_filter_is_manual = True
     elif query:
-        decision = match_taxonomy_query(
-            query=query,
-            settings=load_settings(),
-            apply_to=TaxonomySearchApplyTo.SEARCH,
-            db_session=db_session,
-        )
-        if decision.recommended_action in (
-            TaxonomySearchRecommendedAction.SOFT_FILTER,
-            TaxonomySearchRecommendedAction.HARD_FILTER,
+        taxonomy_settings = load_settings()
+        if (
+            taxonomy_settings.taxonomy_search_enabled
+            and taxonomy_settings.taxonomy_search_mode
+            not in (
+                TaxonomySearchMode.OFF,
+                TaxonomySearchMode.MANUAL_ONLY,
+                TaxonomySearchMode.SUGGEST_ONLY,
+            )
         ):
-            taxonomy_leaf_ids = decision.expanded_leaf_ids
+            try:
+                taxonomy_decision = match_taxonomy_query(
+                    query=query,
+                    settings=taxonomy_settings,
+                    apply_to=TaxonomySearchApplyTo.SEARCH,
+                    db_session=db_session,
+                )
+            except Exception:
+                logger.exception(
+                    "Taxonomy admin search augmentation failed; continuing with normal search"
+                )
+                taxonomy_decision = None
 
     final_filters = IndexFilters(
         source_type=question.filters.source_type,
@@ -92,6 +109,28 @@ def admin_search(
             # / unhide them.
             include_hidden=True,
         )
+        if (
+            taxonomy_decision is not None
+            and taxonomy_decision.recommended_action
+            == TaxonomySearchRecommendedAction.AUGMENT_SEARCH
+            and taxonomy_decision.expanded_leaf_ids
+            and not taxonomy_filter_is_manual
+        ):
+            taxonomy_filters = final_filters.model_copy(
+                update={
+                    "taxonomy_leaf_ids": taxonomy_decision.expanded_leaf_ids,
+                    "taxonomy_node_ids": None,
+                }
+            )
+            taxonomy_chunks = document_index.keyword_retrieval(
+                query=query,
+                filters=taxonomy_filters,
+                num_to_retrieve=NUM_RETURNED_HITS,
+                include_hidden=True,
+            )
+            matching_chunks = combine_retrieval_results(
+                [matching_chunks, taxonomy_chunks]
+            )
 
     documents = SearchDoc.from_chunks_or_sections(matching_chunks)
 

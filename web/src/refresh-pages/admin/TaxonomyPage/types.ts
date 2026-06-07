@@ -33,6 +33,7 @@ export type TaxonomySearchApplyTo = "chat" | "search" | "both";
 export type TaxonomySearchRecommendedAction =
   | "none"
   | "suggest"
+  | "augment_search"
   | "soft_filter"
   | "hard_filter";
 export type TaxonomyTagSource =

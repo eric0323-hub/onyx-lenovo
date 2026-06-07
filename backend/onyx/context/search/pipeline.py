@@ -14,7 +14,9 @@ from onyx.context.search.models import PersonaSearchInfo
 from onyx.context.search.preprocessing.access_filters import (
     build_access_filters_for_user,
 )
+from onyx.context.search.retrieval.search_runner import combine_retrieval_results
 from onyx.context.search.retrieval.search_runner import search_chunks
+from onyx.context.search.utils import get_query_embedding
 from onyx.context.search.utils import inference_section_from_chunks
 from onyx.db.document_set import filter_document_set_names_by_user_access
 from onyx.db.models import User
@@ -31,6 +33,7 @@ from onyx.secondary_llm_flows.time_filter import extract_time_filter
 from onyx.server.settings.store import load_settings
 from onyx.taxonomy.models import TaxonomySearchApplyTo
 from onyx.taxonomy.models import TaxonomySearchDecision
+from onyx.taxonomy.models import TaxonomySearchMode
 from onyx.taxonomy.models import TaxonomySearchRecommendedAction
 from onyx.taxonomy.search_matcher import match_taxonomy_query
 from onyx.utils.logger import setup_logger
@@ -47,7 +50,6 @@ logger = setup_logger()
 @dataclass(frozen=True)
 class _IndexFilterBuildResult:
     filters: IndexFilters
-    taxonomy_decision: TaxonomySearchDecision | None = None
     taxonomy_filter_is_manual: bool = False
 
 
@@ -69,7 +71,6 @@ def _build_index_filters(
     hierarchy_node_ids: list[int] | None = None,
     # Pre-fetched ACL filters (skips DB query when provided)
     acl_filters: list[str] | None = None,
-    taxonomy_apply_to: TaxonomySearchApplyTo = TaxonomySearchApplyTo.CHAT,
 ) -> _IndexFilterBuildResult:
     if auto_detect_filters and (llm is None or query is None):
         raise RuntimeError("LLM and query are required for auto detect filters")
@@ -147,7 +148,6 @@ def _build_index_filters(
         user_acl_filters = build_access_filters_for_user(user, db_session)
 
     taxonomy_leaf_ids: list[str] | None = None
-    taxonomy_decision: TaxonomySearchDecision | None = None
     taxonomy_filter_is_manual = False
     if db_session is not None:
         if base_filters.taxonomy_node_ids:
@@ -157,18 +157,6 @@ def _build_index_filters(
                 active_only=True,
             )
             taxonomy_filter_is_manual = True
-        elif query:
-            taxonomy_decision = match_taxonomy_query(
-                query=query,
-                settings=load_settings(),
-                apply_to=taxonomy_apply_to,
-                db_session=db_session,
-            )
-            if taxonomy_decision.recommended_action in (
-                TaxonomySearchRecommendedAction.SOFT_FILTER,
-                TaxonomySearchRecommendedAction.HARD_FILTER,
-            ):
-                taxonomy_leaf_ids = taxonomy_decision.expanded_leaf_ids
 
     final_filters = IndexFilters(
         project_id_filter=project_id_filter,
@@ -188,7 +176,6 @@ def _build_index_filters(
 
     return _IndexFilterBuildResult(
         filters=final_filters,
-        taxonomy_decision=taxonomy_decision,
         taxonomy_filter_is_manual=taxonomy_filter_is_manual,
     )
 
@@ -365,11 +352,47 @@ def search_pipeline(
         attached_document_ids=attached_document_ids,
         hierarchy_node_ids=hierarchy_node_ids,
         acl_filters=acl_filters,
-        taxonomy_apply_to=taxonomy_apply_to,
     )
     filters = filter_build_result.filters
 
     query_keywords = strip_stopwords(chunk_search_request.query)
+    query_embedding = None
+    taxonomy_decision: TaxonomySearchDecision | None = None
+    if (
+        db_session is not None
+        and chunk_search_request.query
+        and not filter_build_result.taxonomy_filter_is_manual
+    ):
+        taxonomy_settings = load_settings()
+        if (
+            taxonomy_settings.taxonomy_search_enabled
+            and taxonomy_settings.taxonomy_search_mode
+            not in (
+                TaxonomySearchMode.OFF,
+                TaxonomySearchMode.MANUAL_ONLY,
+                TaxonomySearchMode.SUGGEST_ONLY,
+            )
+        ):
+            try:
+                query_embedding = get_query_embedding(
+                    chunk_search_request.query,
+                    db_session=db_session,
+                    embedding_model=embedding_model,
+                )
+                taxonomy_decision = match_taxonomy_query(
+                    query=chunk_search_request.query,
+                    settings=taxonomy_settings,
+                    apply_to=taxonomy_apply_to,
+                    db_session=db_session,
+                    embedding_model=embedding_model,
+                    query_embedding=query_embedding,
+                )
+            except Exception:
+                logger.exception(
+                    "Taxonomy search augmentation failed; continuing with normal search"
+                )
+                query_embedding = None
+                taxonomy_decision = None
 
     def build_query_request(index_filters: IndexFilters) -> ChunkIndexRequest:
         return ChunkIndexRequest(
@@ -379,6 +402,7 @@ def search_pipeline(
             query_keywords=query_keywords,
             filters=index_filters,
             limit=chunk_search_request.limit,
+            query_embedding=query_embedding,
         )
 
     query_request = build_query_request(filters)
@@ -395,30 +419,21 @@ def search_pipeline(
 
     retrieved_chunks = run_search(query_request)
 
-    taxonomy_decision = filter_build_result.taxonomy_decision
     if (
         taxonomy_decision is not None
         and taxonomy_decision.recommended_action
-        == TaxonomySearchRecommendedAction.SOFT_FILTER
-        and filters.taxonomy_leaf_ids
+        == TaxonomySearchRecommendedAction.AUGMENT_SEARCH
+        and taxonomy_decision.expanded_leaf_ids
         and not filter_build_result.taxonomy_filter_is_manual
     ):
-        taxonomy_config = load_settings()
-        if (
-            len(retrieved_chunks)
-            < taxonomy_config.taxonomy_search_min_results_for_filtered_search
-        ):
-            relaxed_filters = filters.model_copy(
-                update={"taxonomy_leaf_ids": None, "taxonomy_node_ids": None}
-            )
-            logger.info(
-                "Relaxing taxonomy soft filter for query after %s results; "
-                "matched node=%s confidence=%s",
-                len(retrieved_chunks),
-                taxonomy_decision.node_id,
-                taxonomy_decision.confidence,
-            )
-            retrieved_chunks = run_search(build_query_request(relaxed_filters))
+        taxonomy_filters = filters.model_copy(
+            update={
+                "taxonomy_leaf_ids": taxonomy_decision.expanded_leaf_ids,
+                "taxonomy_node_ids": None,
+            }
+        )
+        taxonomy_chunks = run_search(build_query_request(taxonomy_filters))
+        retrieved_chunks = combine_retrieval_results([retrieved_chunks, taxonomy_chunks])
 
     # For some specific connectors like Salesforce, a user that has access to an object doesn't mean
     # that they have access to all of the fields of the object.

@@ -125,6 +125,7 @@ class TaxonomySearchApplyTo(str, Enum):
 class TaxonomySearchRecommendedAction(str, Enum):
     NONE = "none"
     SUGGEST = "suggest"
+    AUGMENT_SEARCH = "augment_search"
     SOFT_FILTER = "soft_filter"
     HARD_FILTER = "hard_filter"
 
@@ -379,6 +380,8 @@ class TaxonomyCandidateMatch(BaseModel):
     path: list[str]
     confidence: float
     basis: str
+    name_score: float | None = None
+    definition_score: float | None = None
 
 
 class TaxonomySearchDecision(BaseModel):

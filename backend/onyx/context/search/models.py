@@ -12,6 +12,7 @@ from onyx.db.models import SearchSettings
 from onyx.indexing.models import BaseChunk
 from onyx.indexing.models import IndexingSetting
 from onyx.tools.tool_implementations.web_search.models import WEB_SEARCH_PREFIX
+from shared_configs.model_server_models import Embedding
 
 
 class QueryExpansions(BaseModel):
@@ -129,6 +130,7 @@ class ChunkIndexRequest(BasicChunkRequest):
     filters: IndexFilters
 
     query_keywords: list[str] | None = None
+    query_embedding: Embedding | None = None
 
 
 class ContextExpansionType(str, Enum):

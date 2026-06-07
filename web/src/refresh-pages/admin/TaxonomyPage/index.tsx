@@ -2446,27 +2446,17 @@ function ArticleTagResultList({ tags }: { tags: DocumentTaxonomyTag[] }) {
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       {activeTags.map((tag) => {
         const title = getDocumentTaxonomyTagTitle(tag);
-        const colorClass =
-          tag.review_status === "confirmed"
-            ? "bg-theme-green-01 text-theme-green-05"
-            : "bg-theme-blue-01 text-theme-blue-05";
+        const isNew = isTaskGeneratedTag(tag);
 
         return (
-          <Tooltip key={tag.id} tooltip={title}>
-            <div
-              className={`flex h-4 max-w-[15rem] min-w-0 items-center overflow-hidden rounded-04 px-1 ${colorClass}`}
-              title={title}
-            >
-              <Text
-                as="p"
-                font="figure-small-value"
-                color="inherit"
-                maxLines={1}
-              >
-                {title}
-              </Text>
-            </div>
-          </Tooltip>
+          <div key={tag.id} className="flex min-w-0 items-center gap-1">
+            <ArticleTagPill tag={tag} maxWidthClassName="max-w-[15rem]" />
+            {isNew && (
+              <Tooltip tooltip="本次标签为自检 Agent 新增">
+                <NewTagBadge />
+              </Tooltip>
+            )}
+          </div>
         );
       })}
     </div>
@@ -2551,21 +2541,60 @@ function getDocumentTaxonomyTagTitle(tag: DocumentTaxonomyTag) {
   return `${tag.full_path_snapshot} · ${(tag.confidence * 100).toFixed(0)}%`;
 }
 
-function CompactArticleTag({ tag }: { tag: DocumentTaxonomyTag }) {
+function isTaskGeneratedTag(tag: DocumentTaxonomyTag) {
+  return tag.source === "task_generated";
+}
+
+function NewTagBadge() {
+  return (
+    <div className="flex h-4 shrink-0 items-center rounded-04 bg-theme-green-01 px-1 text-theme-green-05">
+      <Text as="p" font="figure-small-value" color="inherit" nowrap>
+        新增
+      </Text>
+    </div>
+  );
+}
+
+function ArticleTagPill({
+  tag,
+  maxWidthClassName = "max-w-full",
+}: {
+  tag: DocumentTaxonomyTag;
+  maxWidthClassName?: string;
+}) {
   const title = getDocumentTaxonomyTagTitle(tag);
+  const isNew = isTaskGeneratedTag(tag);
   const colorClass =
     tag.review_status === "confirmed"
       ? "bg-theme-green-01 text-theme-green-05"
       : "bg-theme-blue-01 text-theme-blue-05";
+  const tooltip = isNew ? `${title}\n自检 Agent 新增标签` : title;
 
   return (
-    <div
-      className={`flex h-4 max-w-full min-w-0 items-center overflow-hidden rounded-04 px-1 ${colorClass}`}
-      title={title}
-    >
-      <Text as="p" font="figure-small-value" color="inherit" maxLines={1}>
-        {title}
-      </Text>
+    <Tooltip tooltip={tooltip}>
+      <div
+        className={`flex h-4 ${maxWidthClassName} min-w-0 items-center overflow-hidden rounded-04 px-1 ${colorClass}`}
+        title={tooltip}
+      >
+        <Text as="p" font="figure-small-value" color="inherit" maxLines={1}>
+          {title}
+        </Text>
+      </div>
+    </Tooltip>
+  );
+}
+
+function CompactArticleTag({ tag }: { tag: DocumentTaxonomyTag }) {
+  const isNew = isTaskGeneratedTag(tag);
+
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      <ArticleTagPill tag={tag} />
+      {isNew && (
+        <Tooltip tooltip="自检 Agent 新增的三级标签">
+          <NewTagBadge />
+        </Tooltip>
+      )}
     </div>
   );
 }
@@ -2731,6 +2760,8 @@ function SummaryEditorModal({
   const [value, setValue] = useState(summary?.summary ?? "");
   const [lastSavedValue, setLastSavedValue] = useState(summary?.summary ?? "");
   const [saving, setSaving] = useState(false);
+  const activeTags = tags.filter((tag) => tag.status === "active");
+  const taskGeneratedTags = activeTags.filter(isTaskGeneratedTag);
 
   useEffect(() => {
     const nextValue = summary?.summary ?? "";
@@ -2834,10 +2865,31 @@ function SummaryEditorModal({
                       标签结果
                     </Text>
                     <Text font="secondary-body" color="text-03">
-                      {`${tags.filter((tag) => tag.status === "active").length} 个有效标签`}
+                      {`${activeTags.length} 个有效标签`}
                     </Text>
                   </div>
                   <ArticleTagResultList tags={tags} />
+                  {taskGeneratedTags.length > 0 && (
+                    <div className="flex min-w-0 flex-col gap-2 rounded-04 border border-theme-green-02 bg-theme-green-01 px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <NewTagBadge />
+                        <div className="text-theme-green-05">
+                          <Text font="main-ui-action" color="inherit">
+                            本次新增标签
+                          </Text>
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        {taskGeneratedTags.map((tag) => (
+                          <ArticleTagPill
+                            key={tag.id}
+                            tag={tag}
+                            maxWidthClassName="max-w-[20rem]"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </Card>
             </Section>

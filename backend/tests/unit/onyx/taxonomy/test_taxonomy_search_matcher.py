@@ -10,11 +10,34 @@ from onyx.taxonomy.models import TaxonomySearchMode
 from onyx.taxonomy.search_matcher import match_taxonomy_query
 
 
+class FakeEmbeddingModel:
+    model_name = "fake-taxonomy-embedding"
+    provider_type = None
+    api_url = None
+    reduced_dimension = None
+    normalize = True
+    query_prefix = None
+    passage_prefix = None
+
+    def encode(self, texts, text_type):  # noqa: ANN001
+        assert text_type is not None
+        embeddings = []
+        for text in texts:
+            if "假期" in text or "年假" in text or "请假" in text:
+                embeddings.append([1.0, 0.0])
+            elif "报销" in text or "发票" in text:
+                embeddings.append([0.0, 1.0])
+            else:
+                embeddings.append([0.2, 0.2])
+        return embeddings
+
+
 class StubNode:
     def __init__(
         self,
         *,
         id: str,
+        version_id: int = 1,
         level: TaxonomyNodeLevel,
         name: str,
         full_path: str,
@@ -25,6 +48,7 @@ class StubNode:
         definition: str = "",
     ) -> None:
         self.id = id
+        self.version_id = version_id
         self.level = level
         self.name = name
         self.display_name = None
@@ -112,10 +136,57 @@ def test_matcher_matches_leaf_and_expands_to_leaf_ids(monkeypatch) -> None:
         ),
         apply_to=TaxonomySearchApplyTo.SEARCH,
         db_session=None,  # type: ignore[arg-type]
+        embedding_model=FakeEmbeddingModel(),  # type: ignore[arg-type]
+        query_embedding=[1.0, 0.0],
     )
 
     assert decision.matched is True
     assert decision.node_id == "v1.hr.policy.leave"
     assert decision.path == ["人力资源文档", "HR 政策", "假期政策"]
     assert decision.expanded_leaf_ids == ["v1.hr.policy.leave"]
-    assert decision.recommended_action.value == "soft_filter"
+    assert decision.recommended_action.value == "augment_search"
+    assert decision.candidates[0].definition_score is not None
+
+
+def test_matcher_does_not_auto_match_non_leaf_nodes(monkeypatch) -> None:
+    nodes = [
+        StubNode(
+            id="v1.hr",
+            level=TaxonomyNodeLevel.L1,
+            name="人力资源文档",
+            full_path="人力资源文档",
+            path_node_ids=["v1.hr"],
+            definition="员工年假和请假流程相关文档。",
+        ),
+        StubNode(
+            id="v1.hr.policy",
+            level=TaxonomyNodeLevel.L2,
+            name="HR 政策",
+            full_path="人力资源文档 / HR 政策",
+            path_node_ids=["v1.hr", "v1.hr.policy"],
+            parent_id="v1.hr",
+            definition="员工年假和请假流程相关文档。",
+        ),
+    ]
+
+    monkeypatch.setattr(
+        "onyx.taxonomy.search_matcher.get_active_nodes", lambda _: nodes
+    )
+
+    decision = match_taxonomy_query(
+        query="员工年假和请假流程",
+        settings=Settings(
+            taxonomy_search_enabled=True,
+            taxonomy_search_mode=TaxonomySearchMode.SOFT_FILTER_WITH_FALLBACK,
+            taxonomy_search_apply_to=TaxonomySearchApplyTo.SEARCH,
+            taxonomy_search_default_confidence_threshold=0.3,
+        ),
+        apply_to=TaxonomySearchApplyTo.SEARCH,
+        db_session=None,  # type: ignore[arg-type]
+        embedding_model=FakeEmbeddingModel(),  # type: ignore[arg-type]
+        query_embedding=[1.0, 0.0],
+    )
+
+    assert decision.matched is False
+    assert decision.recommended_action.value == "none"
+    assert decision.reason == "no active taxonomy leaf nodes"

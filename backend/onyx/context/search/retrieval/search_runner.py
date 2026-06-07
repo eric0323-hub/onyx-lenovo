@@ -55,7 +55,7 @@ def _embed_and_hybrid_search(
     db_session: Session | None = None,
     embedding_model: EmbeddingModel | None = None,
 ) -> list[InferenceChunk]:
-    query_embedding = get_query_embedding(
+    query_embedding = query_request.query_embedding or get_query_embedding(
         query_request.query,
         db_session=db_session,
         embedding_model=embedding_model,

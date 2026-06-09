@@ -51,6 +51,48 @@ from onyx.taxonomy.models import TaxonomySnapshot
 from onyx.taxonomy.models import TaxonomyVersionSnapshot
 
 
+def get_imported_taxonomy_article_file_id(document: Document) -> str | None:
+    if not (document.doc_metadata or {}).get("taxonomy_article_import"):
+        return None
+    file_id = (document.doc_metadata or {}).get("taxonomy_article_file_id")
+    if not isinstance(file_id, str) or not file_id:
+        return None
+    return file_id
+
+
+def get_imported_taxonomy_article_file_name(document: Document) -> str | None:
+    if not (document.doc_metadata or {}).get("taxonomy_article_import"):
+        return None
+    file_name = (document.doc_metadata or {}).get("taxonomy_article_file_name")
+    if isinstance(file_name, str) and file_name:
+        return file_name
+    return None
+
+
+def get_imported_taxonomy_articles_by_document_or_file_id(
+    db_session: Session,
+    *,
+    identifier: str,
+) -> list[Document]:
+    document = db_session.get(Document, identifier)
+    if (
+        document is not None
+        and get_imported_taxonomy_article_file_id(document) is not None
+    ):
+        return [document]
+
+    stmt = (
+        select(Document)
+        .where(Document.doc_metadata["taxonomy_article_import"].as_boolean().is_(True))
+        .where(
+            Document.doc_metadata["taxonomy_article_file_id"].as_string() == identifier
+        )
+        .order_by(Document.id.asc())
+        .limit(50)
+    )
+    return list(db_session.scalars(stmt).all())
+
+
 def _slugify(value: str) -> str:
     cleaned = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "_", value.strip()).strip("_")
     return cleaned.lower() or uuid4().hex[:8]
@@ -737,11 +779,13 @@ def get_document_summaries(
     for document, summary in rows:
         label_status = label_statuses_by_document.get(document.id)
         current_label_status = label_status.value if label_status else None
+        source_file_name = get_imported_taxonomy_article_file_name(document)
         if summary:
             snapshots.append(
                 DocumentTaxonomySummarySnapshot(
                     document_id=document.id,
                     semantic_id=document.semantic_id,
+                    source_file_name=source_file_name,
                     summary=summary.summary,
                     status=summary.status,
                     is_manual=summary.is_manual,
@@ -756,6 +800,7 @@ def get_document_summaries(
                 DocumentTaxonomySummarySnapshot(
                     document_id=document.id,
                     semantic_id=document.semantic_id,
+                    source_file_name=source_file_name,
                     summary=None,
                     status=TaxonomySummaryStatus.PENDING,
                     is_manual=False,
@@ -784,9 +829,7 @@ def get_imported_taxonomy_article(
 
 
 def _get_imported_taxonomy_article_file_id(document: Document) -> str | None:
-    file_id = (document.doc_metadata or {}).get("taxonomy_article_file_id")
-    if not isinstance(file_id, str) or not file_id:
-        return None
+    file_id = get_imported_taxonomy_article_file_id(document)
     if file_id == document.file_id:
         return None
     return file_id

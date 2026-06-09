@@ -119,6 +119,7 @@ export type FeatureVisibilityConfig = {
   adminPanel: boolean;
   adminLanguageModels: boolean;
   adminWebSearch: boolean;
+  adminExternalRetrieval: boolean;
   adminImageGeneration: boolean;
   adminVoice: boolean;
   adminCodeInterpreter: boolean;
@@ -200,6 +201,7 @@ export const defaultFeatureVisibilityConfig: FeatureVisibilityConfig = {
   adminPanel: true,
   adminLanguageModels: true,
   adminWebSearch: true,
+  adminExternalRetrieval: true,
   adminImageGeneration: true,
   adminVoice: true,
   adminCodeInterpreter: true,
@@ -345,6 +347,7 @@ type RouteLike = {
 const adminRouteFeatureEntries: [string, FeatureVisibilityKey][] = [
   ["/admin/configuration/language-models", "adminLanguageModels"],
   ["/admin/configuration/web-search", "adminWebSearch"],
+  ["/admin/external-retrieval", "adminExternalRetrieval"],
   ["/admin/configuration/image-generation", "adminImageGeneration"],
   ["/admin/configuration/voice", "adminVoice"],
   ["/admin/configuration/code-interpreter", "adminCodeInterpreter"],

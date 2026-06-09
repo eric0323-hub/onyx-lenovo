@@ -1,5 +1,9 @@
 import { SvgSearch, SvgSearchMenu } from "@opal/icons";
-import { SearchToolPacket } from "@/app/app/services/streamingModels";
+import {
+  SearchSourceProgress,
+  SearchSourceStatus,
+  SearchToolPacket,
+} from "@/app/app/services/streamingModels";
 import {
   MessageRenderer,
   RenderType,
@@ -37,6 +41,74 @@ const resultToSourceInfo = (doc: OnyxDocument): SourceInfo => ({
   },
 });
 
+const sourceStatusLabels: Record<SearchSourceStatus, string> = {
+  pending: "Pending",
+  searching: "Searching",
+  normalizing: "Normalizing",
+  completed: "Completed",
+  empty: "No relevant results",
+  skipped: "Skipped",
+  timeout: "Timed out",
+  error: "Error",
+};
+
+function sourceStatusDetail(source: SearchSourceProgress): string {
+  if (source.warning) {
+    return source.warning;
+  }
+  if (source.status === "completed") {
+    const returned = source.result_count ?? 0;
+    const accepted = source.accepted_count ?? returned;
+    const latency =
+      source.latency_ms != null ? ` · ${source.latency_ms}ms` : "";
+    return `${accepted} accepted / ${returned} returned${latency}`;
+  }
+  if (source.status === "empty") {
+    const latency =
+      source.latency_ms != null ? ` · ${source.latency_ms}ms` : "";
+    return `No relevant results${latency}`;
+  }
+  return sourceStatusLabels[source.status];
+}
+
+function SourceProgressList({ sources }: { sources: SearchSourceProgress[] }) {
+  if (sources.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Text as="p" mainUiMuted text04>
+        Sources
+      </Text>
+      <div className="flex flex-col gap-1">
+        {sources.map((source) => {
+          const isWarning =
+            source.status === "timeout" || source.status === "error";
+          return (
+            <div
+              key={source.source_id}
+              className="grid min-h-8 grid-cols-[180px_1fr] items-center gap-4 rounded border border-border px-3 py-1.5"
+            >
+              <Text as="p" mainUiAction text05>
+                {source.source_name}
+              </Text>
+              <Text
+                as="p"
+                text04
+                mainUiMuted={!isWarning}
+                className={isWarning ? "text-status-warning-05" : undefined}
+              >
+                {sourceStatusDetail(source)}
+              </Text>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /**
  * InternalSearchToolRenderer - Renders internal document search tool execution steps
  *
@@ -61,7 +133,7 @@ export const InternalSearchToolRenderer: MessageRenderer<
   children,
 }) => {
   const searchState = constructCurrentSearchState(packets);
-  const { queries, results, isComplete } = searchState;
+  const { queries, results, sources, isComplete } = searchState;
 
   const isCompact = renderType === RenderType.COMPACT;
   const isHighlight = renderType === RenderType.HIGHLIGHT;
@@ -69,14 +141,17 @@ export const InternalSearchToolRenderer: MessageRenderer<
 
   const hasResults = results.length > 0;
 
-  const queriesHeader = "Searching internal documents";
+  const queriesHeader =
+    sources.length > 1
+      ? "Searching knowledge sources"
+      : "Searching internal documents";
 
-  if (queries.length === 0) {
+  if (queries.length === 0 && sources.length === 0) {
     return children([
       {
         icon: SvgSearchMenu,
         status: queriesHeader,
-        content: <></>,
+        content: <SourceProgressList sources={sources} />,
         supportsCollapsible: true,
         timelineLayout: "timeline",
       },
@@ -96,6 +171,7 @@ export const InternalSearchToolRenderer: MessageRenderer<
             <Text as="p" text04 mainUiMuted className="mb-1">
               {queriesHeader}
             </Text>
+            <SourceProgressList sources={sources} />
             <SearchChipList
               items={results}
               initialCount={INITIAL_RESULTS_TO_SHOW}
@@ -136,16 +212,19 @@ export const InternalSearchToolRenderer: MessageRenderer<
           supportsCollapsible: true,
           timelineLayout: "content",
           content: (
-            <SearchChipList
-              items={queries}
-              initialCount={INITIAL_QUERIES_TO_SHOW}
-              expansionCount={QUERIES_PER_EXPANSION}
-              getKey={(_, index) => index}
-              toSourceInfo={queryToSourceInfo}
-              emptyState={!stopPacketSeen ? <BlinkingBar /> : undefined}
-              showDetailsCard={false}
-              isQuery={true}
-            />
+            <div className="flex flex-col gap-2">
+              <SourceProgressList sources={sources} />
+              <SearchChipList
+                items={queries}
+                initialCount={INITIAL_QUERIES_TO_SHOW}
+                expansionCount={QUERIES_PER_EXPANSION}
+                getKey={(_, index) => index}
+                toSourceInfo={queryToSourceInfo}
+                emptyState={!stopPacketSeen ? <BlinkingBar /> : undefined}
+                showDetailsCard={false}
+                isQuery={true}
+              />
+            </div>
           ),
         },
       ]);
@@ -197,16 +276,22 @@ export const InternalSearchToolRenderer: MessageRenderer<
       content: (
         <div className="flex flex-col">
           {!isCompact && (
-            <SearchChipList
-              items={queries}
-              initialCount={INITIAL_QUERIES_TO_SHOW}
-              expansionCount={QUERIES_PER_EXPANSION}
-              getKey={(_, index) => index}
-              toSourceInfo={queryToSourceInfo}
-              emptyState={!stopPacketSeen ? <BlinkingBar /> : undefined}
-              showDetailsCard={false}
-              isQuery={true}
-            />
+            <div className="flex flex-col gap-2">
+              <Text as="p" mainUiMuted text04>
+                Search terms
+              </Text>
+              <SearchChipList
+                items={queries}
+                initialCount={INITIAL_QUERIES_TO_SHOW}
+                expansionCount={QUERIES_PER_EXPANSION}
+                getKey={(_, index) => index}
+                toSourceInfo={queryToSourceInfo}
+                emptyState={!stopPacketSeen ? <BlinkingBar /> : undefined}
+                showDetailsCard={false}
+                isQuery={true}
+              />
+              <SourceProgressList sources={sources} />
+            </div>
           )}
 
           {(results.length > 0 || queries.length > 0) && (

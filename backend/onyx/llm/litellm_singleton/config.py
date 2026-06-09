@@ -20,8 +20,7 @@ def configure_litellm_settings() -> None:
 
 # TODO: We might not need to register ollama_chat in addition to ollama but let's just do it for good measure for now.
 def register_ollama_models() -> None:
-    litellm.register_model(
-        model_cost={
+    model_cost = {
             # GPT-OSS models
             "ollama_chat/gpt-oss:120b-cloud": {"supports_function_calling": True},
             "ollama_chat/gpt-oss:120b": {"supports_function_calling": True},
@@ -106,8 +105,21 @@ def register_ollama_models() -> None:
             "ollama_chat/glm-4.6": {"supports_function_calling": True},
             "ollama/glm-4.6": {"supports_function_calling": True},
             "ollama/glm-4.6-cloud": {"supports_function_calling": True},
-        }
-    )
+    }
+
+    # Avoid litellm.register_model here. LiteLLM calls get_model_info() for
+    # every registered model, and Ollama get_model_info() probes
+    # http://localhost:11434/api/show. That network side effect can block all
+    # non-Ollama LLM calls during singleton initialization.
+    for model_name, metadata in model_cost.items():
+        litellm.model_cost.setdefault(model_name, {}).update(metadata)
+
+    try:
+        from litellm.utils import _invalidate_model_cost_lowercase_map
+
+        _invalidate_model_cost_lowercase_map()
+    except Exception as e:
+        logger.debug("Failed to invalidate LiteLLM model cost cache: %s", e)
 
 
 def load_model_metadata_enrichments() -> None:

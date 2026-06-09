@@ -15,6 +15,7 @@ from onyx.db.enums import TaxonomyCandidateStatus
 from onyx.db.enums import TaxonomyNodeLevel
 from onyx.db.enums import TaxonomyNodeSource
 from onyx.db.enums import TaxonomyReviewStatus
+from onyx.db.enums import TaxonomySummaryStatus
 from onyx.db.enums import TaxonomyTaggingSource
 from onyx.db.enums import TaxonomyTaggingTaskStatus
 from onyx.db.enums import TaxonomyTagSource
@@ -26,12 +27,20 @@ from onyx.db.models import TaxonomyNode
 from onyx.db.models import TaxonomyTaggingTask
 from onyx.db.taxonomy import create_taxonomy_version_from_tree
 from onyx.db.taxonomy import get_active_taxonomy_version
+from onyx.db.taxonomy import upsert_document_summary
 from onyx.kg.models import KGStage
 from onyx.llm.interfaces import LLM
 from onyx.taxonomy.constants import TAXONOMY_PROMPT_VERSION
+from onyx.taxonomy.llm_service import TaxonomyCandidateRecommendation
+from onyx.taxonomy.llm_service import TaxonomyCandidateForHealthCheck
 from onyx.taxonomy.llm_service import TaxonomyCandidateHealthDecision
+from onyx.taxonomy.llm_service import TaxonomyExistingLabelFallbackResult
+from onyx.taxonomy.llm_service import TaxonomyTagRecommendation
+from onyx.taxonomy.llm_service import TaxonomyTaggingResult
+from onyx.taxonomy.models import StartTaggingRequest
 from onyx.taxonomy.models import TaxonomyNodeCreate
 from onyx.taxonomy.service import _process_candidate_labels_after_batch
+from onyx.taxonomy.service import run_tagging_task
 
 
 @pytest.fixture
@@ -223,8 +232,8 @@ def test_candidate_health_flow_batches_reuse_and_new_leaf_binding(
         return [
             TaxonomyCandidateHealthDecision(
                 candidate_id=reuse_candidate.id,
-                action="reuse_existing",
-                reason="已有故障排查可覆盖",
+                action="reject",
+                reason="拒绝新增故障排查别名，已有故障排查可覆盖",
                 suggested_reuse_node_id=fault_leaf.id,
             ),
             TaxonomyCandidateHealthDecision(
@@ -279,6 +288,8 @@ def test_candidate_health_flow_batches_reuse_and_new_leaf_binding(
     assert active_version is not None
     assert active_version.id != version.id
     assert active_version.source == TaxonomyVersionSource.TAGGING_OPTIMIZATION
+    assert active_version.change_summary == "新增标签：远程诊断"
+    assert active_version.change_reason == "新增标签：远程诊断"
 
     new_remote_leaves = list(
         taxonomy_session.scalars(
@@ -297,6 +308,7 @@ def test_candidate_health_flow_batches_reuse_and_new_leaf_binding(
     taxonomy_session.refresh(new_candidate_one)
     taxonomy_session.refresh(new_candidate_two)
     assert reuse_candidate.status == TaxonomyCandidateStatus.REUSED_EXISTING
+    assert reuse_candidate.redundancy_result == "reject"
     assert new_candidate_one.status == TaxonomyCandidateStatus.TASK_ADDED
     assert new_candidate_two.status == TaxonomyCandidateStatus.TASK_ADDED
 
@@ -320,6 +332,9 @@ def test_candidate_health_flow_batches_reuse_and_new_leaf_binding(
     existing_doc_tags = [tag for tag in active_tags if tag.document_id == doc_existing]
     assert len(existing_doc_tags) == 1
     assert existing_doc_tags[0].leaf_node_id == remapped_fault_leaf.id
+
+    reuse_doc_tags = [tag for tag in active_tags if tag.document_id == doc_reuse]
+    assert remapped_fault_leaf.id in {tag.leaf_node_id for tag in reuse_doc_tags}
 
     generated_remote_tags = [
         tag for tag in active_tags if tag.leaf_node_id == new_remote_leaf.id
@@ -415,3 +430,305 @@ def test_candidate_health_flow_remaps_task_tags_when_no_candidates(
     assert tag.version_id == latest_version.id
     assert tag.leaf_node_id == latest_fault_leaf.id
     assert tag.full_path_snapshot == latest_fault_leaf.full_path
+
+
+def test_tagging_task_falls_back_to_existing_leaf_when_candidates_need_handling(
+    taxonomy_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = create_taxonomy_version_from_tree(
+        taxonomy_session,
+        nodes=_taxonomy_tree(),
+        taxonomy_name=f"test-taxonomy-{uuid4().hex}",
+        industry_context=None,
+        company_description=None,
+        source=TaxonomyVersionSource.MANUAL,
+        change_summary="Test taxonomy",
+        change_reason="Test taxonomy",
+        created_by_user_id=None,
+        activate=True,
+    )
+    taxonomy_session.flush()
+    fault_leaf = _node_by_code(
+        taxonomy_session,
+        version_id=version.id,
+        code="fault",
+    )
+    document_id = f"taxonomy-flow-fallback-{uuid4().hex}"
+    _add_document(taxonomy_session, document_id)
+    upsert_document_summary(
+        taxonomy_session,
+        document_id=document_id,
+        summary="文档涉及内存、主板和固件恢复，但前序候选没有生成可用已有标签。",
+        status=TaxonomySummaryStatus.COMPLETE,
+        is_manual=False,
+    )
+    taxonomy_session.flush()
+
+    def fake_recommend_taxonomy_tags(
+        *_args: object,
+        **_kwargs: object,
+    ) -> TaxonomyTaggingResult:
+        return TaxonomyTaggingResult(
+            tags=[],
+            unmatched_reason="前序推荐未匹配",
+            candidates=[
+                TaxonomyCandidateRecommendation(
+                    path=["技术资源", "维修规范", "硬件组装标准"],
+                    definition="维修规范候选",
+                    evidence="维修规范证据",
+                    confidence=0.82,
+                    redundancy_result="needs_handling",
+                )
+            ],
+        )
+
+    def fake_review_candidate_labels(
+        *,
+        candidates: list[TaxonomyCandidateForHealthCheck],
+        **_kwargs: object,
+    ) -> list[TaxonomyCandidateHealthDecision]:
+        return [
+            TaxonomyCandidateHealthDecision(
+                candidate_id=candidates[0].candidate_id,
+                action="needs_handling",
+                reason="候选不是已有 leaf 的直接冗余",
+            )
+        ]
+
+    def fake_recommend_existing_taxonomy_tags_forced(
+        *_args: object,
+        **_kwargs: object,
+    ) -> TaxonomyExistingLabelFallbackResult:
+        return TaxonomyExistingLabelFallbackResult(
+            tags=[
+                TaxonomyTagRecommendation(
+                    leaf_node_id=fault_leaf.id,
+                    confidence=0.71,
+                    evidence="内存、主板和固件恢复可由故障排查承载",
+                )
+            ],
+            reason="前序候选不可新增时复用最接近的已有故障排查 leaf",
+        )
+
+    monkeypatch.setattr(
+        "onyx.taxonomy.service.get_default_llm",
+        lambda temperature=0: cast(LLM, object()),
+    )
+    monkeypatch.setattr(
+        "onyx.taxonomy.service.model_info",
+        lambda llm: {
+            "model_provider": "test",
+            "model_name": "test",
+            "prompt_version": TAXONOMY_PROMPT_VERSION,
+        },
+    )
+    monkeypatch.setattr(
+        "onyx.taxonomy.service.recommend_taxonomy_tags",
+        fake_recommend_taxonomy_tags,
+    )
+    monkeypatch.setattr(
+        "onyx.taxonomy.service.review_taxonomy_candidate_labels",
+        fake_review_candidate_labels,
+    )
+    monkeypatch.setattr(
+        "onyx.taxonomy.service.recommend_existing_taxonomy_tags_forced",
+        fake_recommend_existing_taxonomy_tags_forced,
+    )
+    monkeypatch.setattr(taxonomy_session, "commit", taxonomy_session.flush)
+
+    task = run_tagging_task(
+        db_session=taxonomy_session,
+        request=StartTaggingRequest(
+            document_ids=[document_id],
+            source=TaxonomyTaggingSource.SUMMARY,
+            enable_optimization=True,
+            limit=1,
+        ),
+        created_by_user_id=None,
+    )
+    taxonomy_session.flush()
+
+    assert task.status == TaxonomyTaggingTaskStatus.COMPLETE
+    assert task.failed_docs == 0
+    tags = list(
+        taxonomy_session.scalars(
+            select(DocumentTaxonomyTag).where(
+                DocumentTaxonomyTag.task_id == task.id,
+                DocumentTaxonomyTag.document_id == document_id,
+            )
+        ).all()
+    )
+    assert len(tags) == 1
+    assert tags[0].status == TaxonomyAssignmentStatus.ACTIVE
+    assert tags[0].leaf_node_id == fault_leaf.id
+    assert tags[0].full_path_snapshot == fault_leaf.full_path
+    assert tags[0].unmatched_reason == "前序候选不可新增时复用最接近的已有故障排查 leaf"
+
+    failed_tags = [
+        tag for tag in tags if tag.status == TaxonomyAssignmentStatus.TAGGING_FAILED
+    ]
+    assert failed_tags == []
+
+    candidates = list(
+        taxonomy_session.scalars(
+            select(TaxonomyCandidateLabel).where(
+                TaxonomyCandidateLabel.task_id == task.id,
+                TaxonomyCandidateLabel.document_id == document_id,
+            )
+        ).all()
+    )
+    assert len(candidates) == 1
+    assert candidates[0].status == TaxonomyCandidateStatus.NEEDS_HANDLING
+
+
+def test_low_confidence_tag_becomes_health_checked_new_leaf(
+    taxonomy_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = create_taxonomy_version_from_tree(
+        taxonomy_session,
+        nodes=_taxonomy_tree(),
+        taxonomy_name=f"test-taxonomy-{uuid4().hex}",
+        industry_context=None,
+        company_description=None,
+        source=TaxonomyVersionSource.MANUAL,
+        change_summary="Test taxonomy",
+        change_reason="Test taxonomy",
+        created_by_user_id=None,
+        activate=True,
+    )
+    taxonomy_session.flush()
+    fault_leaf = _node_by_code(
+        taxonomy_session,
+        version_id=version.id,
+        code="fault",
+    )
+    support_l2 = _node_by_code(
+        taxonomy_session,
+        version_id=version.id,
+        code="support",
+    )
+    document_id = f"taxonomy-flow-low-confidence-{uuid4().hex}"
+    _add_document(taxonomy_session, document_id)
+    upsert_document_summary(
+        taxonomy_session,
+        document_id=document_id,
+        summary="文档描述睡眠唤醒异常，已有故障排查标签低置信但需要新增更贴切 leaf。",
+        status=TaxonomySummaryStatus.COMPLETE,
+        is_manual=False,
+    )
+    taxonomy_session.flush()
+
+    def fake_recommend_taxonomy_tags(
+        *_args: object,
+        **_kwargs: object,
+    ) -> TaxonomyTaggingResult:
+        return TaxonomyTaggingResult(
+            tags=[
+                TaxonomyTagRecommendation(
+                    leaf_node_id=fault_leaf.id,
+                    confidence=0.42,
+                    evidence="睡眠后无法唤醒，已有故障排查不够贴切",
+                )
+            ],
+            unmatched_reason="已有标签置信度低，需要健康自检新增更贴切三级标签",
+            candidates=[],
+        )
+
+    captured_candidate_ids: list[int] = []
+
+    def fake_review_candidate_labels(
+        *,
+        candidates: list[TaxonomyCandidateForHealthCheck],
+        **_kwargs: object,
+    ) -> list[TaxonomyCandidateHealthDecision]:
+        captured_candidate_ids.extend(candidate.candidate_id for candidate in candidates)
+        return [
+            TaxonomyCandidateHealthDecision(
+                candidate_id=candidates[0].candidate_id,
+                action="add_leaf",
+                reason="低置信已有标签无法精准覆盖，新增睡眠唤醒 leaf",
+                parent_l2_node_id=support_l2.id,
+                leaf_name="睡眠唤醒",
+                definition="睡眠、休眠或 Modern Standby 恢复失败的问题",
+                applicability="合盖睡眠后无法唤醒、休眠恢复失败、唤醒源异常",
+                keywords=["睡眠唤醒"],
+                synonyms=["休眠恢复"],
+                positive_examples=["合盖睡眠后无法唤醒"],
+                negative_examples=["冷启动无法开机"],
+            )
+        ]
+
+    monkeypatch.setattr(
+        "onyx.taxonomy.service.get_default_llm",
+        lambda temperature=0: cast(LLM, object()),
+    )
+    monkeypatch.setattr(
+        "onyx.taxonomy.service.model_info",
+        lambda llm: {
+            "model_provider": "test",
+            "model_name": "test",
+            "prompt_version": TAXONOMY_PROMPT_VERSION,
+        },
+    )
+    monkeypatch.setattr(
+        "onyx.taxonomy.service.recommend_taxonomy_tags",
+        fake_recommend_taxonomy_tags,
+    )
+    monkeypatch.setattr(
+        "onyx.taxonomy.service.review_taxonomy_candidate_labels",
+        fake_review_candidate_labels,
+    )
+    monkeypatch.setattr(taxonomy_session, "commit", taxonomy_session.flush)
+
+    task = run_tagging_task(
+        db_session=taxonomy_session,
+        request=StartTaggingRequest(
+            document_ids=[document_id],
+            source=TaxonomyTaggingSource.SUMMARY,
+            enable_optimization=True,
+            limit=1,
+        ),
+        created_by_user_id=None,
+    )
+    taxonomy_session.flush()
+
+    assert task.status == TaxonomyTaggingTaskStatus.COMPLETE
+    assert task.failed_docs == 0
+    assert captured_candidate_ids
+
+    active_version = get_active_taxonomy_version(taxonomy_session)
+    assert active_version is not None
+    assert active_version.id != version.id
+    assert active_version.change_summary == "新增标签：睡眠唤醒"
+
+    tags = list(
+        taxonomy_session.scalars(
+            select(DocumentTaxonomyTag).where(
+                DocumentTaxonomyTag.task_id == task.id,
+                DocumentTaxonomyTag.document_id == document_id,
+            )
+        ).all()
+    )
+    assert len(tags) == 1
+    assert tags[0].status == TaxonomyAssignmentStatus.ACTIVE
+    assert tags[0].full_path_snapshot == "客户服务 / 售后处理 / 睡眠唤醒"
+    assert tags[0].confidence == pytest.approx(0.7)
+
+    candidates = list(
+        taxonomy_session.scalars(
+            select(TaxonomyCandidateLabel).where(
+                TaxonomyCandidateLabel.task_id == task.id,
+                TaxonomyCandidateLabel.document_id == document_id,
+            )
+        ).all()
+    )
+    assert len(candidates) == 1
+    assert candidates[0].status == TaxonomyCandidateStatus.TASK_ADDED
+    assert candidates[0].confidence == pytest.approx(0.7)
+
+    needs_review_tags = [
+        tag for tag in tags if tag.status == TaxonomyAssignmentStatus.NEEDS_REVIEW
+    ]
+    assert needs_review_tags == []

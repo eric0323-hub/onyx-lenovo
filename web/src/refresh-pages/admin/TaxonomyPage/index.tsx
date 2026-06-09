@@ -10,6 +10,8 @@ import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import Tree from "rc-tree";
 import type { TreeNodeProps, TreeProps } from "rc-tree";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
@@ -43,12 +45,14 @@ import {
 } from "@opal/layouts";
 import {
   SvgBlocks,
+  SvgBookOpen,
   SvgBracketCurly,
   SvgBranch,
   SvgCheck,
   SvgChevronRight,
   SvgClock,
   SvgEdit,
+  SvgExternalLink,
   SvgFileText,
   SvgLoader,
   SvgPlus,
@@ -68,10 +72,12 @@ import {
   activateTaxonomyVersion,
   createTaxonomyDraft,
   deleteImportedArticle,
+  fetchImportedArticleOriginal,
   fetchDocumentTaxonomyTags,
   fetchTaxonomyGenerationConfig,
   generateSummaries,
   generateTaxonomyDraftStream,
+  getImportedArticleOriginalUrl,
   importArticles,
   matchTaxonomyQuery,
   runTagging,
@@ -552,7 +558,39 @@ function getArticleLabelStatusTag(summary: DocumentTaxonomySummary) {
 }
 
 function getDocumentTitle(summary: DocumentTaxonomySummary) {
-  return summary.semantic_id?.trim() || "未命名文章";
+  return (
+    summary.source_file_name?.trim() ||
+    summary.semantic_id?.trim() ||
+    "未命名文章"
+  );
+}
+
+function getArticleFileName(summary: DocumentTaxonomySummary) {
+  return summary.source_file_name?.trim() || "";
+}
+
+function getArticleFileExtension(summary: DocumentTaxonomySummary) {
+  const fileName = getArticleFileName(summary).toLowerCase();
+  const match = fileName.match(/\.([a-z0-9]+)$/);
+  return match?.[1] ?? "";
+}
+
+function getArticleOriginalKind(summary: DocumentTaxonomySummary) {
+  const extension = getArticleFileExtension(summary);
+  if (extension === "pdf") {
+    return "pdf" as const;
+  }
+  if (extension === "md" || extension === "markdown") {
+    return "markdown" as const;
+  }
+  return "unsupported" as const;
+}
+
+function canPreviewArticleOriginal(summary: DocumentTaxonomySummary) {
+  return (
+    Boolean(getArticleFileName(summary)) &&
+    getArticleOriginalKind(summary) !== "unsupported"
+  );
 }
 
 function createEmptyTaxonomyNode(
@@ -2303,7 +2341,7 @@ function TaxonomyBuilder({ versions }: { versions: TaxonomyVersion[] }) {
                   prominence="tertiary"
                   size="xs"
                 >
-                  版本历史
+                  版本记录
                 </Button>
               </div>
             </div>
@@ -2473,8 +2511,43 @@ function getSummaryStatusColor(status: DocumentTaxonomySummary["status"]) {
   return "blue" as const;
 }
 
+function ProcessingCellIndicator({
+  ariaLabel,
+  tooltip,
+}: {
+  ariaLabel: string;
+  tooltip: string;
+}) {
+  return (
+    <Tooltip tooltip={tooltip}>
+      <div
+        aria-label={ariaLabel}
+        className="flex size-6 items-center justify-center rounded-04 bg-status-info-01 text-status-info-05"
+        role="status"
+      >
+        <SvgLoader size={14} className="animate-spin" />
+      </div>
+    </Tooltip>
+  );
+}
+
+function articleTagsAreProcessing({
+  summary,
+  hasActiveTaggingTask,
+}: {
+  summary: DocumentTaxonomySummary;
+  hasActiveTaggingTask: boolean;
+}) {
+  return (
+    summary.status === "pending" ||
+    (summary.status === "complete" &&
+      summary.current_label_status == null &&
+      hasActiveTaggingTask)
+  );
+}
+
 const IMPORTED_ARTICLES_GRID_COLUMNS =
-  "3rem minmax(13rem,1.55fr) 10.5rem 7rem 5rem minmax(12rem,1.25fr) 7.5rem";
+  "3rem minmax(0,1.7fr) 11.5rem 7rem 5rem minmax(12rem,1.25fr) 7.5rem";
 
 function ArticleProgressCell({
   summary,
@@ -2499,6 +2572,17 @@ function ArticleSummaryStatus({
 }: {
   summary: DocumentTaxonomySummary;
 }) {
+  if (summary.status === "pending") {
+    return (
+      <div className="flex min-w-0 items-center justify-center">
+        <ProcessingCellIndicator
+          ariaLabel="Summary 正在生成"
+          tooltip="正在生成 Summary"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-w-0 items-center justify-center">
       <Tag
@@ -2511,16 +2595,33 @@ function ArticleSummaryStatus({
 
 function ArticleFileNameCell({
   summary,
+  onViewOriginal,
 }: {
   summary: DocumentTaxonomySummary;
+  onViewOriginal: (summary: DocumentTaxonomySummary) => void;
 }) {
   const title = getDocumentTitle(summary);
+  const canPreview = canPreviewArticleOriginal(summary);
 
   return (
-    <div className="min-w-0" title={title}>
-      <Text as="p" font="main-ui-action" color="text-05" maxLines={1}>
-        {title}
-      </Text>
+    <div className="min-w-0 overflow-hidden" title={title}>
+      <button
+        type="button"
+        className="block w-full min-w-0 overflow-hidden text-left outline-hidden disabled:cursor-default"
+        onClick={() => canPreview && onViewOriginal(summary)}
+        disabled={!canPreview}
+      >
+        <span className="block max-w-full truncate">
+          <Text
+            as="span"
+            font="main-ui-action"
+            color={canPreview ? "text-05" : "text-03"}
+            nowrap
+          >
+            {title}
+          </Text>
+        </span>
+      </button>
     </div>
   );
 }
@@ -2620,7 +2721,30 @@ function CompactHiddenTagCount({
   );
 }
 
-function ArticleTagsCell({ tags }: { tags: DocumentTaxonomyTag[] }) {
+function ArticleTagsCell({
+  summary,
+  tags,
+  hasActiveTaggingTask,
+}: {
+  summary: DocumentTaxonomySummary;
+  tags: DocumentTaxonomyTag[];
+  hasActiveTaggingTask: boolean;
+}) {
+  if (articleTagsAreProcessing({ summary, hasActiveTaggingTask })) {
+    return (
+      <div className="flex min-w-0 justify-center">
+        <ProcessingCellIndicator
+          ariaLabel="标签等待处理"
+          tooltip={
+            summary.status === "pending"
+              ? "等待 Summary 完成后自动打标签"
+              : "正在生成标签"
+          }
+        />
+      </div>
+    );
+  }
+
   const failedTag = tags.find((tag) => tag.status === "tagging_failed");
   if (failedTag) {
     const failedStatus = <Tag title="打标签失败" color="amber" />;
@@ -2751,23 +2875,30 @@ function ArticleDeleteConfirmModal({
 
 function SummaryEditorModal({
   summary,
+  initialShowOriginal = false,
   onClose,
 }: {
   summary: DocumentTaxonomySummary | null;
+  initialShowOriginal?: boolean;
   onClose: () => void;
 }) {
   const tags = useDocumentTaxonomyTags(summary?.document_id ?? "");
   const [value, setValue] = useState(summary?.summary ?? "");
   const [lastSavedValue, setLastSavedValue] = useState(summary?.summary ?? "");
   const [saving, setSaving] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(initialShowOriginal);
   const activeTags = tags.filter((tag) => tag.status === "active");
   const taskGeneratedTags = activeTags.filter(isTaskGeneratedTag);
+  const originalCanPreview = summary
+    ? canPreviewArticleOriginal(summary)
+    : false;
 
   useEffect(() => {
     const nextValue = summary?.summary ?? "";
     setValue(nextValue);
     setLastSavedValue(nextValue);
-  }, [summary?.document_id, summary?.summary]);
+    setShowOriginal(initialShowOriginal);
+  }, [initialShowOriginal, summary?.document_id, summary?.summary]);
 
   const handleClose = () => {
     if (saving) {
@@ -2793,13 +2924,18 @@ function SummaryEditorModal({
     }
   };
   const summaryHasChanges = summary != null && value !== lastSavedValue;
+  const modalTitle = showOriginal ? "查看原文" : "编辑 Summary";
 
   return (
     <Modal open={!!summary} onOpenChange={(isOpen) => !isOpen && handleClose()}>
-      <Modal.Content width="lg" height="lg" background="gray">
+      <Modal.Content
+        width={showOriginal ? "full" : "lg"}
+        height="lg"
+        background="gray"
+      >
         <Modal.Header
-          icon={SvgFileText}
-          title="编辑 Summary"
+          icon={showOriginal ? SvgBookOpen : SvgFileText}
+          title={modalTitle}
           description={
             summary
               ? `${getDocumentTitle(summary)} · 保存后会自动重新打标签`
@@ -2809,93 +2945,131 @@ function SummaryEditorModal({
         />
         <Modal.Body>
           {summary && (
-            <Section gap={1} alignItems="stretch">
-              <Card border="solid" rounding="md" padding="md">
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
-                  <div className="min-w-0">
-                    <Text font="main-ui-action" color="text-05" maxLines={2}>
-                      {getDocumentTitle(summary)}
-                    </Text>
-                    <Text
-                      as="p"
-                      font="secondary-body"
-                      color="text-03"
-                      maxLines={1}
-                    >
-                      {formatDate(summary.generated_at || summary.updated_at)}
-                    </Text>
+            <div
+              className={
+                showOriginal
+                  ? "grid w-full grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] items-start gap-4"
+                  : "w-full"
+              }
+            >
+              <Section gap={1} alignItems="stretch">
+                <Card border="solid" rounding="md" padding="md">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
+                    <div className="min-w-0">
+                      <button
+                        type="button"
+                        className="block max-w-full text-left outline-hidden"
+                        onClick={() =>
+                          originalCanPreview && setShowOriginal(true)
+                        }
+                        disabled={!originalCanPreview}
+                      >
+                        <Text
+                          as="span"
+                          font="main-ui-action"
+                          color={originalCanPreview ? "text-05" : "text-03"}
+                          maxLines={2}
+                        >
+                          {getDocumentTitle(summary)}
+                        </Text>
+                      </button>
+                      <Text
+                        as="p"
+                        font="secondary-body"
+                        color="text-03"
+                        maxLines={1}
+                      >
+                        {formatDate(summary.generated_at || summary.updated_at)}
+                      </Text>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      <Tag
+                        title={getSummaryStatusLabel(summary.status)}
+                        color={getSummaryStatusColor(summary.status)}
+                      />
+                      <Tag
+                        title={summary.is_manual ? "人工摘要" : "AI 摘要"}
+                        color={summary.is_manual ? "purple" : "gray"}
+                      />
+                      <Tag
+                        title={getArticleLabelStatusTag(summary).title}
+                        color={getArticleLabelStatusTag(summary).color}
+                      />
+                    </div>
                   </div>
-                  <div className="flex flex-wrap items-center justify-end gap-1.5">
-                    <Tag
-                      title={getSummaryStatusLabel(summary.status)}
-                      color={getSummaryStatusColor(summary.status)}
-                    />
-                    <Tag
-                      title={summary.is_manual ? "人工摘要" : "AI 摘要"}
-                      color={summary.is_manual ? "purple" : "gray"}
-                    />
-                    <Tag
-                      title={getArticleLabelStatusTag(summary).title}
-                      color={getArticleLabelStatusTag(summary).color}
-                    />
-                  </div>
-                </div>
-              </Card>
+                </Card>
 
-              <InputVertical title="Summary" withLabel>
-                <InputTextArea
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  rows={8}
-                  maxRows={16}
-                  autoResize
-                  placeholder="文章入库后会自动生成 Summary，可在这里手动修改。"
-                />
-              </InputVertical>
+                <InputVertical title="Summary" withLabel>
+                  <InputTextArea
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    rows={showOriginal ? 6 : 8}
+                    maxRows={showOriginal ? 8 : 16}
+                    autoResize
+                    placeholder="文章入库后会自动生成 Summary，可在这里手动修改。"
+                  />
+                </InputVertical>
 
-              <Card
-                border="solid"
-                rounding="md"
-                padding="md"
-                background="light"
-              >
-                <div className="flex min-w-0 flex-col gap-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <Text font="main-ui-action" color="text-05">
-                      标签结果
-                    </Text>
-                    <Text font="secondary-body" color="text-03">
-                      {`${activeTags.length} 个有效标签`}
-                    </Text>
-                  </div>
-                  <ArticleTagResultList tags={tags} />
-                  {taskGeneratedTags.length > 0 && (
-                    <div className="flex min-w-0 flex-col gap-2 rounded-04 border border-theme-green-02 bg-theme-green-01 px-3 py-2">
-                      <div className="flex items-center gap-1.5">
-                        <NewTagBadge />
-                        <div className="text-theme-green-05">
-                          <Text font="main-ui-action" color="inherit">
-                            本次新增标签
-                          </Text>
+                <Card
+                  border="solid"
+                  rounding="md"
+                  padding="md"
+                  background="light"
+                >
+                  <div className="flex min-w-0 flex-col gap-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <Text font="main-ui-action" color="text-05">
+                        标签结果
+                      </Text>
+                      <Text font="secondary-body" color="text-03">
+                        {`${activeTags.length} 个有效标签`}
+                      </Text>
+                    </div>
+                    <ArticleTagResultList tags={tags} />
+                    {taskGeneratedTags.length > 0 && (
+                      <div className="flex min-w-0 flex-col gap-2 rounded-04 border border-theme-green-02 bg-theme-green-01 px-3 py-2">
+                        <div className="flex items-center gap-1.5">
+                          <NewTagBadge />
+                          <div className="text-theme-green-05">
+                            <Text font="main-ui-action" color="inherit">
+                              本次新增标签
+                            </Text>
+                          </div>
+                        </div>
+                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          {taskGeneratedTags.map((tag) => (
+                            <ArticleTagPill
+                              key={tag.id}
+                              tag={tag}
+                              maxWidthClassName="max-w-[20rem]"
+                            />
+                          ))}
                         </div>
                       </div>
-                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        {taskGeneratedTags.map((tag) => (
-                          <ArticleTagPill
-                            key={tag.id}
-                            tag={tag}
-                            maxWidthClassName="max-w-[20rem]"
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </Card>
-            </Section>
+                    )}
+                  </div>
+                </Card>
+              </Section>
+              {showOriginal && (
+                <ArticleOriginalViewer
+                  summary={summary}
+                  onClose={() => setShowOriginal(false)}
+                />
+              )}
+            </div>
           )}
         </Modal.Body>
         <Modal.Footer>
+          {summary && (
+            <Button
+              icon={showOriginal ? SvgFileText : SvgBookOpen}
+              prominence="tertiary"
+              onClick={() => setShowOriginal((current) => !current)}
+              disabled={!originalCanPreview}
+            >
+              {showOriginal ? "隐藏原文" : "查看原文"}
+            </Button>
+          )}
           <Button prominence="secondary" onClick={handleClose}>
             关闭
           </Button>
@@ -2913,17 +3087,191 @@ function SummaryEditorModal({
   );
 }
 
+function ArticleMarkdownPreview({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      className="prose max-w-none text-text-04"
+      remarkPlugins={[remarkGfm]}
+      components={{
+        table: ({ children }) => (
+          <div className="overflow-auto rounded-08 border border-border-01">
+            <table className="min-w-full border-collapse">{children}</table>
+          </div>
+        ),
+        a: ({ href, children }) => (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-link underline"
+          >
+            {children}
+          </a>
+        ),
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
+function ArticleOriginalViewer({
+  summary,
+  onClose,
+}: {
+  summary: DocumentTaxonomySummary;
+  onClose: () => void;
+}) {
+  const originalKind = getArticleOriginalKind(summary);
+  const originalUrl = getImportedArticleOriginalUrl(summary.document_id);
+  const [markdownContent, setMarkdownContent] = useState<string | null>(null);
+  const [loadingMarkdown, setLoadingMarkdown] = useState(false);
+  const [markdownError, setMarkdownError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (originalKind !== "markdown") {
+      setMarkdownContent(null);
+      setMarkdownError(null);
+      setLoadingMarkdown(false);
+      return;
+    }
+
+    let ignore = false;
+    setLoadingMarkdown(true);
+    setMarkdownError(null);
+    fetchImportedArticleOriginal(summary.document_id)
+      .then((content) => {
+        if (!ignore) {
+          setMarkdownContent(content);
+        }
+      })
+      .catch((error) => {
+        if (!ignore) {
+          setMarkdownError(
+            error instanceof Error ? error.message : "原文加载失败"
+          );
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoadingMarkdown(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [originalKind, summary.document_id]);
+
+  let body: ReactNode;
+  if (originalKind === "pdf") {
+    body = (
+      <iframe
+        title={`原文：${getDocumentTitle(summary)}`}
+        src={originalUrl}
+        className="h-[34rem] w-full rounded-08 border border-border-01 bg-background-tint-00"
+      />
+    );
+  } else if (originalKind === "markdown") {
+    if (loadingMarkdown) {
+      body = (
+        <div className="flex h-[34rem] items-center justify-center rounded-08 border border-border-01 bg-background-tint-00">
+          <div className="flex items-center gap-2 text-text-03">
+            <SvgLoader size={16} className="animate-spin" />
+            <Text font="secondary-body" color="inherit">
+              原文加载中
+            </Text>
+          </div>
+        </div>
+      );
+    } else if (markdownError) {
+      body = (
+        <MessageCard
+          variant="warning"
+          title="原文加载失败"
+          description={markdownError}
+          padding="sm"
+        />
+      );
+    } else {
+      body = (
+        <div className="h-[34rem] overflow-auto rounded-08 border border-border-01 bg-background-tint-00 p-4">
+          <pre className="m-0 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-text-04">
+            {markdownContent ?? ""}
+          </pre>
+        </div>
+      );
+    }
+  } else {
+    body = (
+      <MessageCard
+        variant="warning"
+        title="暂不支持预览"
+        description="当前仅支持 Markdown 和 PDF 原文预览。"
+        padding="sm"
+      />
+    );
+  }
+
+  return (
+    <Card border="solid" rounding="md" padding="fit" background="light">
+      <div className="flex min-h-0 flex-col">
+        <div className="flex items-start justify-between gap-3 border-b border-border-01 px-4 py-3">
+          <div className="flex min-w-0 items-start gap-2">
+            <div className="shrink-0 pt-0.5 text-text-04">
+              {originalKind === "pdf" ? (
+                <SvgFileText size={16} />
+              ) : (
+                <SvgBookOpen size={16} />
+              )}
+            </div>
+            <div className="min-w-0">
+              <Text as="p" font="main-ui-action" color="text-05" nowrap>
+                原文内容
+              </Text>
+              <Text as="p" font="secondary-body" color="text-03" maxLines={1}>
+                {getDocumentTitle(summary)}
+              </Text>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              href={originalUrl}
+              target="_blank"
+              icon={SvgExternalLink}
+              prominence="tertiary"
+              size="sm"
+              tooltip="新标签页打开"
+            />
+            <Button
+              aria-label="隐藏原文"
+              icon={SvgX}
+              prominence="tertiary"
+              size="sm"
+              tooltip="隐藏原文"
+              onClick={onClose}
+            />
+          </div>
+        </div>
+        <div className="p-3">{body}</div>
+      </div>
+    </Card>
+  );
+}
+
 function ImportedArticleRow({
   articleNumber,
   summary,
   hasActiveTaggingTask,
   onEditSummary,
+  onViewOriginal,
   onDeleteSummary,
 }: {
   articleNumber: number;
   summary: DocumentTaxonomySummary;
   hasActiveTaggingTask: boolean;
   onEditSummary: (summary: DocumentTaxonomySummary) => void;
+  onViewOriginal: (summary: DocumentTaxonomySummary) => void;
   onDeleteSummary: (summary: DocumentTaxonomySummary) => void;
 }) {
   const tags = useDocumentTaxonomyTags(summary.document_id);
@@ -2939,14 +3287,21 @@ function ImportedArticleRow({
             {String(articleNumber)}
           </Text>
         </div>
-        <ArticleFileNameCell summary={summary} />
+        <ArticleFileNameCell
+          summary={summary}
+          onViewOriginal={onViewOriginal}
+        />
         <ArticleTimeCell summary={summary} />
         <ArticleSummaryStatus summary={summary} />
         <ArticleProgressCell
           summary={summary}
           hasActiveTaggingTask={hasActiveTaggingTask}
         />
-        <ArticleTagsCell tags={tags} />
+        <ArticleTagsCell
+          summary={summary}
+          tags={tags}
+          hasActiveTaggingTask={hasActiveTaggingTask}
+        />
         <ArticleDetailCell
           summary={summary}
           onEditSummary={onEditSummary}
@@ -3012,6 +3367,10 @@ function ImportedArticlesList({
 }) {
   const [editingSummary, setEditingSummary] =
     useState<DocumentTaxonomySummary | null>(null);
+  const [
+    editingSummaryStartsWithOriginal,
+    setEditingSummaryStartsWithOriginal,
+  ] = useState(false);
   const [deletingSummary, setDeletingSummary] =
     useState<DocumentTaxonomySummary | null>(null);
   const [deletingArticle, setDeletingArticle] = useState(false);
@@ -3031,6 +3390,16 @@ function ImportedArticlesList({
     } finally {
       setDeletingArticle(false);
     }
+  };
+
+  const handleEditSummary = (summary: DocumentTaxonomySummary) => {
+    setEditingSummaryStartsWithOriginal(false);
+    setEditingSummary(summary);
+  };
+
+  const handleViewOriginal = (summary: DocumentTaxonomySummary) => {
+    setEditingSummaryStartsWithOriginal(true);
+    setEditingSummary(summary);
   };
 
   return (
@@ -3086,7 +3455,8 @@ function ImportedArticlesList({
               articleNumber={index + 1}
               summary={summary}
               hasActiveTaggingTask={hasActiveTaggingTask}
-              onEditSummary={setEditingSummary}
+              onEditSummary={handleEditSummary}
+              onViewOriginal={handleViewOriginal}
               onDeleteSummary={setDeletingSummary}
             />
           ))}
@@ -3094,7 +3464,11 @@ function ImportedArticlesList({
       </Card>
       <SummaryEditorModal
         summary={editingSummary}
-        onClose={() => setEditingSummary(null)}
+        initialShowOriginal={editingSummaryStartsWithOriginal}
+        onClose={() => {
+          setEditingSummary(null);
+          setEditingSummaryStartsWithOriginal(false);
+        }}
       />
       <ArticleDeleteConfirmModal
         summary={deletingSummary}
@@ -3774,7 +4148,7 @@ function ActiveTaxonomyPanel({
   ).length;
   const historyDescription = versions.length
     ? `${versions.length} 个版本 · ${draftCount} 个草稿待生效`
-    : "暂无版本历史";
+    : "暂无版本记录";
   const activeVersionSummary = activeVersion
     ? `v${activeVersion.version_number} · ${activeCounts?.l1 ?? 0} 个一级 · ${activeCounts?.l2 ?? 0} 个二级 · ${activeCounts?.leaf ?? 0} 个三级`
     : "创建并生效草稿后，将在这里展示标签树";
@@ -3868,7 +4242,7 @@ function ActiveTaxonomyPanel({
             <div className="p-2">
               <Content
                 icon={SvgClock}
-                title="版本历史"
+                title="版本记录"
                 description={historyDescription}
                 sizePreset="main-ui"
                 variant="section"
@@ -3913,7 +4287,7 @@ function ActiveTaxonomyPanel({
                 </Card>
               ))
             ) : (
-              <EmptyMessageCard sizePreset="main-ui" title="暂无版本历史" />
+              <EmptyMessageCard sizePreset="main-ui" title="暂无版本记录" />
             )}
           </Section>
         </Card>

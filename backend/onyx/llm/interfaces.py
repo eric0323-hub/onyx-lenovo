@@ -85,6 +85,7 @@ class LLM(abc.ABC):
         max_tokens: int | None = None,
         reasoning_effort: ReasoningEffort = ReasoningEffort.AUTO,
         user_identity: LLMUserIdentity | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> "ModelResponse":
         raise NotImplementedError
 
@@ -98,5 +99,6 @@ class LLM(abc.ABC):
         max_tokens: int | None = None,
         reasoning_effort: ReasoningEffort = ReasoningEffort.AUTO,
         user_identity: LLMUserIdentity | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> Iterator[ModelResponseStream]:
         raise NotImplementedError

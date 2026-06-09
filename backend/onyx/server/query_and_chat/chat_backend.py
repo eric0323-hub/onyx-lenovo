@@ -2,6 +2,7 @@ import datetime
 import json
 from collections.abc import Generator
 from datetime import timedelta
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter
@@ -14,6 +15,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from onyx.access.access import get_access_for_documents
+from onyx.access.access import get_acl_for_user
 from onyx.access.access import user_can_access_chat_file
 from onyx.auth.api_key import get_hashed_api_key_from_request
 from onyx.auth.pat import get_hashed_pat_from_request
@@ -58,9 +61,13 @@ from onyx.db.enums import Permission
 from onyx.db.feedback import create_chat_message_feedback
 from onyx.db.feedback import remove_chat_message_feedback
 from onyx.db.models import ChatSessionSharedStatus
+from onyx.db.models import Document
 from onyx.db.models import Persona
 from onyx.db.models import User
 from onyx.db.persona import get_persona_by_id
+from onyx.db.taxonomy import get_imported_taxonomy_article_file_id
+from onyx.db.taxonomy import get_imported_taxonomy_article_file_name
+from onyx.db.taxonomy import get_imported_taxonomy_articles_by_document_or_file_id
 from onyx.db.usage import increment_usage
 from onyx.db.usage import UsageType
 from onyx.db.user_file import get_file_id_by_user_file_id
@@ -108,6 +115,59 @@ from shared_configs.contextvars import get_current_tenant_id
 logger = setup_logger()
 
 router = APIRouter(prefix="/chat")
+
+
+def _inline_content_disposition(file_name: str) -> str:
+    escaped_file_name = file_name.replace("\\", "\\\\").replace('"', '\\"')
+    encoded_file_name = quote(file_name)
+    return f'inline; filename="{escaped_file_name}"; filename*=UTF-8\'\'{encoded_file_name}'
+
+
+def _original_file_media_type(file_name: str | None, stored_type: str | None) -> str:
+    lower_name = (file_name or "").lower()
+    if lower_name.endswith(".pdf"):
+        return "application/pdf"
+    if lower_name.endswith(".md") or lower_name.endswith(".markdown"):
+        return "text/markdown; charset=utf-8"
+    return stored_type or "application/octet-stream"
+
+
+def _user_can_access_any_document(
+    documents: list[Document],
+    user: User,
+    db_session: Session,
+) -> bool:
+    if not documents:
+        return False
+
+    user_acl = get_acl_for_user(user, db_session)
+    doc_access = get_access_for_documents(
+        [document.id for document in documents],
+        db_session,
+    )
+    return any(
+        not user_acl.isdisjoint(access.to_acl()) for access in doc_access.values()
+    )
+
+
+def _resolve_taxonomy_article_original_file(
+    identifier: str,
+    user: User,
+    db_session: Session,
+) -> tuple[str, str | None] | None:
+    documents = get_imported_taxonomy_articles_by_document_or_file_id(
+        db_session,
+        identifier=identifier,
+    )
+    if not _user_can_access_any_document(documents, user, db_session):
+        return None
+
+    document = documents[0]
+    file_id = get_imported_taxonomy_article_file_id(document)
+    if file_id is None:
+        return None
+
+    return file_id, get_imported_taxonomy_article_file_name(document)
 
 
 def _get_available_tokens_for_persona(
@@ -876,12 +936,27 @@ def fetch_chat_file(
     user: User = Depends(require_permission(Permission.BASIC_ACCESS)),
     db_session: Session = Depends(get_session),
 ) -> Response:
+    original_file_name: str | None = None
+    taxonomy_article_access_checked = False
+
     # For user files, we need to get the file id from the user file id
     file_id_from_user_file = get_file_id_by_user_file_id(file_id, db_session)
     if file_id_from_user_file:
         file_id = file_id_from_user_file
+    else:
+        taxonomy_file = _resolve_taxonomy_article_original_file(
+            identifier=file_id,
+            user=user,
+            db_session=db_session,
+        )
+        if taxonomy_file is not None:
+            file_id, original_file_name = taxonomy_file
+            taxonomy_article_access_checked = True
 
-    if not user_can_access_chat_file(file_id, user, db_session):
+    if (
+        not taxonomy_article_access_checked
+        and not user_can_access_chat_file(file_id, user, db_session)
+    ):
         # Return 404 (rather than 403) so callers cannot probe for file
         # existence across ownership boundaries.
         raise OnyxError(OnyxErrorCode.NOT_FOUND, "File not found")
@@ -891,7 +966,8 @@ def fetch_chat_file(
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
-    media_type = file_record.file_type
+    file_name = original_file_name or file_record.display_name or file_id
+    media_type = _original_file_media_type(file_name, file_record.file_type)
     file_io = file_store.read_file(file_id, mode="b")
 
     # Files served here are immutable (content-addressed by file_id), so allow long-lived caching.
@@ -899,6 +975,7 @@ def fetch_chat_file(
     etag = f'"{file_id}"'
     cache_headers = {
         "Cache-Control": "private, max-age=31536000, immutable",
+        "Content-Disposition": _inline_content_disposition(file_name),
         "ETag": etag,
         "Vary": "Cookie",
     }

@@ -3,6 +3,8 @@ import {
   SearchToolPacket,
   SearchToolStart,
   SearchToolQueriesDelta,
+  SearchToolSourceProgressDelta,
+  SearchSourceProgress,
   SearchToolDocumentsDelta,
   SectionEnd,
 } from "@/app/app/services/streamingModels";
@@ -29,6 +31,7 @@ export const RESULTS_PER_EXPANSION = 10;
 export interface SearchState {
   queries: string[];
   results: OnyxDocument[];
+  sources: SearchSourceProgress[];
   isSearching: boolean;
   hasResults: boolean;
   isComplete: boolean;
@@ -55,6 +58,13 @@ export const constructCurrentSearchState = (
     )
     .map((packet) => packet.obj as SearchToolDocumentsDelta);
 
+  const sourceProgressDeltas = packets
+    .filter(
+      (packet) =>
+        packet.obj.type === PacketType.SEARCH_TOOL_SOURCE_PROGRESS_DELTA
+    )
+    .map((packet) => packet.obj as SearchToolSourceProgressDelta);
+
   const searchEnd = packets.find(
     (packet) =>
       packet.obj.type === PacketType.SECTION_END ||
@@ -71,24 +81,54 @@ export const constructCurrentSearchState = (
       return true;
     });
 
+  const latestDocumentDelta =
+    documentDeltas.length > 0
+      ? documentDeltas[documentDeltas.length - 1]
+      : undefined;
   const seenDocIds = new Set<string>();
-  const results = documentDeltas
-    .flatMap((delta) => delta?.documents || [])
-    .filter((doc) => {
-      if (!doc || !doc.document_id) return false;
-      if (seenDocIds.has(doc.document_id)) return false;
-      seenDocIds.add(doc.document_id);
-      return true;
-    });
+  const results = (latestDocumentDelta?.documents || []).filter((doc) => {
+    if (!doc || !doc.document_id) return false;
+    if (seenDocIds.has(doc.document_id)) return false;
+    seenDocIds.add(doc.document_id);
+    return true;
+  });
 
   const isSearching = Boolean(searchStart && !searchEnd);
   const hasResults = results.length > 0;
   const isComplete = Boolean(searchStart && searchEnd);
   const isInternetSearch = searchStart?.is_internet_search || false;
+  const sourceMap = new Map<string, SearchSourceProgress>();
+  packets
+    .filter((packet) => packet.obj.type === PacketType.SEARCH_TOOL_START)
+    .map((packet) => packet.obj as SearchToolStart)
+    .flatMap((start) => start.planned_sources || [])
+    .forEach((source) => {
+      if (!sourceMap.has(source.source_id)) {
+        sourceMap.set(source.source_id, {
+          ...source,
+          status: "pending",
+          result_count: null,
+          accepted_count: null,
+          invalid_count: null,
+          latency_ms: null,
+          warning: null,
+        });
+      }
+    });
+  sourceProgressDeltas
+    .flatMap((delta) => delta.sources || [])
+    .forEach((source) => {
+      sourceMap.set(source.source_id, {
+        ...sourceMap.get(source.source_id),
+        ...source,
+      });
+    });
+  const sources = Array.from(sourceMap.values());
 
   return {
     queries,
     results,
+    sources,
     isSearching,
     hasResults,
     isComplete,

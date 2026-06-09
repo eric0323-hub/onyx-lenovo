@@ -2555,6 +2555,78 @@ class FederatedConnector__DocumentSet(Base):
     )
 
 
+class ExternalRetrievalSource(Base):
+    __tablename__ = "external_retrieval_source"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    adapter_type: Mapped[str] = mapped_column(String, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    credentials: Mapped[SensitiveValue[dict[str, Any]] | None] = mapped_column(
+        EncryptedJson(), nullable=True
+    )
+    config: Mapped[dict[str, Any]] = mapped_column(
+        postgresql.JSONB(), default=dict, nullable=False, server_default="{}"
+    )
+    timeout_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=3000)
+    max_results: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    source_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.6)
+    min_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    call_strategy: Mapped[str] = mapped_column(
+        String, nullable=False, default="original_query_once"
+    )
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    time_created: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    time_updated: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    document_sets: Mapped[list["ExternalRetrievalSource__DocumentSet"]] = (
+        relationship(
+            "ExternalRetrievalSource__DocumentSet",
+            back_populates="external_retrieval_source",
+            cascade="all, delete-orphan",
+        )
+    )
+    created_by_user: Mapped["User | None"] = relationship("User")
+
+
+class ExternalRetrievalSource__DocumentSet(Base):
+    __tablename__ = "external_retrieval_source__document_set"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    external_retrieval_source_id: Mapped[int] = mapped_column(
+        ForeignKey("external_retrieval_source.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    document_set_id: Mapped[int] = mapped_column(
+        ForeignKey("document_set.id", ondelete="CASCADE"), nullable=False
+    )
+    config: Mapped[dict[str, Any]] = mapped_column(
+        postgresql.JSONB(), default=dict, nullable=False, server_default="{}"
+    )
+
+    external_retrieval_source: Mapped["ExternalRetrievalSource"] = relationship(
+        "ExternalRetrievalSource", back_populates="document_sets"
+    )
+    document_set: Mapped["DocumentSet"] = relationship(
+        "DocumentSet", back_populates="external_retrieval_sources"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "external_retrieval_source_id",
+            "document_set_id",
+            name="uq_external_retrieval_source_document_set",
+        ),
+    )
+
+
 class SearchSettings(Base):
     __tablename__ = "search_settings"
 
@@ -4002,6 +4074,13 @@ class DocumentSet(Base):
             back_populates="document_set",
             cascade="all, delete-orphan",
         )
+    )
+    external_retrieval_sources: Mapped[
+        list["ExternalRetrievalSource__DocumentSet"]
+    ] = relationship(
+        "ExternalRetrievalSource__DocumentSet",
+        back_populates="document_set",
+        cascade="all, delete-orphan",
     )
 
 

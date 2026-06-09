@@ -110,8 +110,8 @@ export const ADMIN_ROUTES = {
   TAXONOMY_HISTORY: {
     path: "/admin/taxonomy/history",
     icon: SvgHistory,
-    title: "版本历史",
-    sidebarLabel: "版本历史",
+    title: "版本记录",
+    sidebarLabel: "版本记录",
   },
   TAXONOMY_SUMMARIES: {
     path: "/admin/taxonomy/summaries",
@@ -196,6 +196,12 @@ export const ADMIN_ROUTES = {
     icon: SvgGlobe,
     title: "Web Search",
     sidebarLabel: "Web Search",
+  },
+  EXTERNAL_RETRIEVAL_SOURCES: {
+    path: "/admin/external-retrieval",
+    icon: SvgSearch,
+    title: "External Retrieval Sources",
+    sidebarLabel: "External Retrieval",
   },
   IMAGE_GENERATION: {
     path: "/admin/configuration/image-generation",

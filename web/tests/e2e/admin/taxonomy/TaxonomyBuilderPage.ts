@@ -141,7 +141,7 @@ export class TaxonomyHistoryPage {
     await this.page.goto("/admin/taxonomy/history");
     await expect(
       this.page.locator('[aria-label="admin-page-title"]')
-    ).toContainText("版本历史");
+    ).toContainText("版本记录");
   }
 
   async expectVersionNote(note: string) {

@@ -287,6 +287,7 @@ class GenerateSummaryRequest(BaseModel):
 class DocumentTaxonomySummarySnapshot(BaseModel):
     document_id: str
     semantic_id: str | None = None
+    source_file_name: str | None = None
     summary: str | None
     status: TaxonomySummaryStatus
     is_manual: bool

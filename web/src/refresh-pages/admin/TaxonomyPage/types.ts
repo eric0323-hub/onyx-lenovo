@@ -157,6 +157,7 @@ export interface TaxonomyCoverageStats {
 export interface DocumentTaxonomySummary {
   document_id: string;
   semantic_id?: string | null;
+  source_file_name?: string | null;
   summary?: string | null;
   status: TaxonomySummaryStatus;
   is_manual: boolean;

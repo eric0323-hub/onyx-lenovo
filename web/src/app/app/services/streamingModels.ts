@@ -18,6 +18,7 @@ export enum PacketType {
   // Specific tool packets
   SEARCH_TOOL_START = "search_tool_start",
   SEARCH_TOOL_QUERIES_DELTA = "search_tool_queries_delta",
+  SEARCH_TOOL_SOURCE_PROGRESS_DELTA = "search_tool_source_progress_delta",
   SEARCH_TOOL_DOCUMENTS_DELTA = "search_tool_documents_delta",
   IMAGE_GENERATION_TOOL_START = "image_generation_start",
   IMAGE_GENERATION_TOOL_DELTA = "image_generation_final",
@@ -124,11 +125,44 @@ export interface PacketError extends BaseObj {
 export interface SearchToolStart extends BaseObj {
   type: "search_tool_start";
   is_internet_search?: boolean;
+  planned_sources?: SearchPlannedSource[];
+}
+
+export type SearchSourceKind = "internal" | "external" | "federated" | "web";
+
+export type SearchSourceStatus =
+  | "pending"
+  | "searching"
+  | "normalizing"
+  | "completed"
+  | "empty"
+  | "skipped"
+  | "timeout"
+  | "error";
+
+export interface SearchPlannedSource {
+  source_id: string;
+  source_name: string;
+  source_kind: SearchSourceKind;
 }
 
 export interface SearchToolQueriesDelta extends BaseObj {
   type: "search_tool_queries_delta";
   queries: string[];
+}
+
+export interface SearchSourceProgress extends SearchPlannedSource {
+  status: SearchSourceStatus;
+  result_count?: number | null;
+  accepted_count?: number | null;
+  invalid_count?: number | null;
+  latency_ms?: number | null;
+  warning?: string | null;
+}
+
+export interface SearchToolSourceProgressDelta extends BaseObj {
+  type: "search_tool_source_progress_delta";
+  sources: SearchSourceProgress[];
 }
 
 export interface SearchToolDocumentsDelta extends BaseObj {
@@ -353,6 +387,7 @@ export type PacketErrorObj = PacketError;
 export type SearchToolObj =
   | SearchToolStart
   | SearchToolQueriesDelta
+  | SearchToolSourceProgressDelta
   | SearchToolDocumentsDelta
   | SectionEnd
   | PacketError;

@@ -268,7 +268,12 @@ test.describe("Taxonomy article import upload", () => {
     await expect(
       page.getByText("文章列表 / 详情区", { exact: true })
     ).toBeVisible();
-    await expect(page.getByText("正在总结", { exact: true })).toBeVisible();
+    await expect(
+      page.getByLabel("Summary 正在生成", { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByLabel("标签等待处理", { exact: true })
+    ).toBeVisible();
     await expect(page.getByText("35%", { exact: true })).toBeVisible();
   });
 

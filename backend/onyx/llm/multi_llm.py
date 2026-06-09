@@ -483,6 +483,7 @@ class LitellmLLM(LLM):
         max_tokens: int | None = None,
         user_identity: LLMUserIdentity | None = None,
         client: "HTTPHandler | None" = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> Union["ModelResponse", "CustomStreamWrapper"]:
         # Lazy loading to avoid memory bloat for non-inference flows
         from litellm.exceptions import RateLimitError
@@ -708,6 +709,17 @@ class LitellmLLM(LLM):
                 if tools and tool_choice is not None:
                     optional_kwargs["tool_choice"] = tool_choice
 
+                if extra_body:
+                    passthrough_kwargs = {**passthrough_kwargs}
+                    existing_extra_body = passthrough_kwargs.get("extra_body")
+                    if isinstance(existing_extra_body, dict):
+                        passthrough_kwargs["extra_body"] = {
+                            **existing_extra_body,
+                            **extra_body,
+                        }
+                    else:
+                        passthrough_kwargs["extra_body"] = extra_body
+
                 response = litellm.completion(
                     mock_response=get_llm_mock_response() or MOCK_LLM_RESPONSE,
                     model=model,
@@ -758,6 +770,7 @@ class LitellmLLM(LLM):
         max_tokens: int | None = None,
         reasoning_effort: ReasoningEffort = ReasoningEffort.AUTO,
         user_identity: LLMUserIdentity | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> ModelResponse:
         from litellm import HTTPHandler
         from litellm import ModelResponse as LiteLLMModelResponse
@@ -825,6 +838,7 @@ class LitellmLLM(LLM):
                     reasoning_effort=reasoning_effort,
                     user_identity=user_identity,
                     client=client,
+                    extra_body=extra_body,
                 ),
             )
             chunks = list(stream_response)
@@ -854,6 +868,7 @@ class LitellmLLM(LLM):
         max_tokens: int | None = None,
         reasoning_effort: ReasoningEffort = ReasoningEffort.AUTO,
         user_identity: LLMUserIdentity | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> Iterator[ModelResponseStream]:
         from litellm import CustomStreamWrapper as LiteLLMCustomStreamWrapper
         from litellm import HTTPHandler
@@ -908,6 +923,7 @@ class LitellmLLM(LLM):
                     reasoning_effort=reasoning_effort,
                     user_identity=user_identity,
                     client=client,
+                    extra_body=extra_body,
                 ),
             )
 

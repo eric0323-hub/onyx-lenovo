@@ -18,8 +18,12 @@ from onyx.llm.model_response import ModelResponseStream
 from onyx.llm.models import LanguageModelInput
 from onyx.llm.models import ReasoningEffort
 from onyx.llm.models import ToolChoiceOptions
+from onyx.taxonomy.llm_service import _json_response_format_for_llm
+from onyx.taxonomy.llm_service import _taxonomy_json_max_tokens_for_llm
+from onyx.taxonomy.llm_service import generate_document_summary
 from onyx.taxonomy.llm_service import generate_taxonomy_draft
 from onyx.taxonomy.llm_service import generate_taxonomy_draft_events
+from onyx.taxonomy.llm_service import recommend_existing_taxonomy_tags_forced
 from onyx.taxonomy.llm_service import review_taxonomy_candidate_labels
 from onyx.taxonomy.llm_service import TaxonomyCandidateForHealthCheck
 from onyx.taxonomy.models import TaxonomyGenerationRuntimeConfig
@@ -30,10 +34,12 @@ class StubLLM(LLM):
         self,
         responses: list[str],
         *,
-        model_provider: str = LlmProviderNames.OPENAI,
+        model_provider: str = LlmProviderNames.OPENAI.value,
+        model_name: str = "test-model",
     ) -> None:
         self._responses = responses
         self._model_provider = model_provider
+        self._model_name = model_name
         self.invoke_calls: list[dict[str, object]] = []
         self._lock = Lock()
 
@@ -41,7 +47,7 @@ class StubLLM(LLM):
     def config(self) -> LLMConfig:
         return LLMConfig(
             model_provider=self._model_provider,
-            model_name="test-model",
+            model_name=self._model_name,
             temperature=0,
             max_input_tokens=10000,
         )
@@ -56,6 +62,7 @@ class StubLLM(LLM):
         max_tokens: int | None = None,
         reasoning_effort: ReasoningEffort = ReasoningEffort.AUTO,
         _user_identity: LLMUserIdentity | None = None,
+        extra_body: dict[str, object] | None = None,
     ) -> ModelResponse:
         self.invoke_calls.append(
             {
@@ -63,6 +70,7 @@ class StubLLM(LLM):
                 "structured_response_format": structured_response_format,
                 "max_tokens": max_tokens,
                 "reasoning_effort": reasoning_effort,
+                "extra_body": extra_body,
             }
         )
         with self._lock:
@@ -83,6 +91,7 @@ class StubLLM(LLM):
         max_tokens: int | None = None,
         reasoning_effort: ReasoningEffort = ReasoningEffort.AUTO,
         user_identity: LLMUserIdentity | None = None,
+        extra_body: dict[str, object] | None = None,
     ) -> Iterator[ModelResponseStream]:
         raise NotImplementedError
 
@@ -102,6 +111,7 @@ class RoutingStubLLM(StubLLM):
         max_tokens: int | None = None,
         reasoning_effort: ReasoningEffort = ReasoningEffort.AUTO,
         _user_identity: LLMUserIdentity | None = None,
+        extra_body: dict[str, object] | None = None,
     ) -> ModelResponse:
         self.invoke_calls.append(
             {
@@ -109,6 +119,7 @@ class RoutingStubLLM(StubLLM):
                 "structured_response_format": structured_response_format,
                 "max_tokens": max_tokens,
                 "reasoning_effort": reasoning_effort,
+                "extra_body": extra_body,
             }
         )
         prompt_text = getattr(prompt, "content", str(prompt))
@@ -153,6 +164,125 @@ def _taxonomy_node(
         source=TaxonomyNodeSource.MANUAL,
         status=TaxonomyNodeStatus.ACTIVE,
     )
+
+
+def test_taxonomy_json_mode_enabled_for_supported_providers() -> None:
+    assert _json_response_format_for_llm(
+        StubLLM(
+            [],
+            model_provider="volcengine",
+            model_name="doubao-seed-1-6-flash-250828",
+        )
+    ) == {"type": "json_object"}
+    assert _json_response_format_for_llm(
+        StubLLM([], model_provider="deepseek", model_name="deepseek-chat")
+    ) == {"type": "json_object"}
+    assert _json_response_format_for_llm(
+        StubLLM(
+            [],
+            model_provider=LlmProviderNames.OPENROUTER,
+            model_name="deepseek/deepseek-v4-pro",
+        )
+    ) == {"type": "json_object"}
+    assert _json_response_format_for_llm(
+        StubLLM(
+            [],
+            model_provider=LlmProviderNames.OPENAI_COMPATIBLE,
+            model_name="deepseek-v4-pro",
+        )
+    ) == {"type": "json_object"}
+    assert _json_response_format_for_llm(
+        StubLLM(
+            [],
+            model_provider=LlmProviderNames.LITELLM_PROXY,
+            model_name="deepseek-v4-pro",
+        )
+    ) == {"type": "json_object"}
+    assert (
+        _json_response_format_for_llm(
+            StubLLM(
+                [],
+                model_provider=LlmProviderNames.OPENROUTER,
+                model_name="qwen/qwen3.6-plus",
+            )
+        )
+        is None
+    )
+
+
+def test_taxonomy_json_deepseek_uses_larger_output_budget() -> None:
+    assert (
+        _taxonomy_json_max_tokens_for_llm(
+            llm=StubLLM(
+                [],
+                model_provider=LlmProviderNames.OPENAI_COMPATIBLE,
+                model_name="deepseek-v4-pro",
+            ),
+            max_tokens=3000,
+        )
+        == 8000
+    )
+    assert (
+        _taxonomy_json_max_tokens_for_llm(
+            llm=StubLLM(
+                [],
+                model_provider=LlmProviderNames.OPENROUTER,
+                model_name="qwen/qwen3.6-plus",
+            ),
+            max_tokens=3000,
+        )
+        == 3000
+    )
+
+
+def test_generate_document_summary_disables_thinking() -> None:
+    llm = StubLLM(['{"summary": "测试摘要"}'])
+
+    assert (
+        generate_document_summary(
+            document_title="测试文档",
+            document_content="测试内容",
+            llm=llm,
+        )
+        == "测试摘要"
+    )
+    assert llm.invoke_calls[0]["reasoning_effort"] == ReasoningEffort.OFF
+    assert llm.invoke_calls[0]["extra_body"] == {"enable_thinking": False}
+
+
+def test_recommend_existing_taxonomy_tags_forced_filters_to_valid_leaf_ids() -> None:
+    llm = StubLLM(
+        [
+            """
+{
+  "tags": [
+    {"leaf_node_id": "leaf_existing", "confidence": 0.73, "evidence": "内存故障和主板维修证据"},
+    {"leaf_node_id": "missing_leaf", "confidence": 0.99, "evidence": "无效标签"}
+  ],
+  "reason": "现有故障排查标签最接近"
+}
+"""
+        ]
+    )
+    result = recommend_existing_taxonomy_tags_forced(
+        document_title="测试文档",
+        document_content="涉及内存故障、主板维修和固件恢复",
+        leaf_nodes=[
+            _taxonomy_node(
+                node_id="leaf_existing",
+                level=TaxonomyNodeLevel.LEAF,
+                name="故障排查",
+            )
+        ],
+        llm=llm,
+    )
+
+    assert len(result.tags) == 1
+    assert result.tags[0].leaf_node_id == "leaf_existing"
+    assert result.tags[0].confidence == 0.73
+    assert result.reason == "现有故障排查标签最接近"
+    assert llm.invoke_calls[0]["reasoning_effort"] == ReasoningEffort.OFF
+    assert llm.invoke_calls[0]["extra_body"] == {"enable_thinking": False}
 
 
 def test_generate_taxonomy_draft_repairs_malformed_json() -> None:
@@ -592,9 +722,17 @@ def test_review_taxonomy_candidate_labels_sanitizes_agent_decisions() -> None:
     },
     {
       "candidate_id": 3,
-      "action": "reuse_existing",
+      "action": "reject",
       "reason": "无效 leaf id",
       "suggested_reuse_node_id": "missing_leaf",
+      "parent_l2_node_id": null,
+      "leaf": null
+    },
+    {
+      "candidate_id": 4,
+      "action": "reject",
+      "reason": "拒绝新增，已有故障排查可覆盖",
+      "suggested_reuse_node_id": "leaf_existing",
       "parent_l2_node_id": null,
       "leaf": null
     }
@@ -667,5 +805,6 @@ def test_review_taxonomy_candidate_labels_sanitizes_agent_decisions() -> None:
     assert decision_by_id[2].keywords == ["远程诊断"]
     assert decision_by_id[3].action == "needs_handling"
     assert decision_by_id[3].suggested_reuse_node_id is None
-    assert decision_by_id[4].action == "needs_handling"
+    assert decision_by_id[4].action == "reject"
+    assert decision_by_id[4].suggested_reuse_node_id == "leaf_existing"
     assert len(llm.invoke_calls) == 1

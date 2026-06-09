@@ -34,10 +34,12 @@ so that the rest of the code can persist it, render it in the UI, etc. The respo
 refer to by using matching keywords to other parts of the prompt and reminders.
 """
 
+import re
 import time
 from collections.abc import Callable
 from typing import Any
 from typing import cast
+from typing import Literal
 
 from sqlalchemy.orm import Session
 
@@ -75,6 +77,9 @@ from onyx.db.slack_bot import fetch_slack_bots
 from onyx.document_index.interfaces_new import DocumentIndex
 from onyx.error_handling.error_codes import OnyxErrorCode
 from onyx.error_handling.exceptions import OnyxError
+from onyx.external_retrieval.errors import ExternalRetrievalRequestError
+from onyx.external_retrieval.retrieval import ExternalRetrievalInfo
+from onyx.external_retrieval.retrieval import get_external_retrieval_functions
 from onyx.federated_connectors.federated_retrieval import FederatedRetrievalInfo
 from onyx.federated_connectors.federated_retrieval import (
     get_federated_retrieval_functions,
@@ -89,8 +94,11 @@ from onyx.secondary_llm_flows.query_expansion import keyword_query_expansion
 from onyx.secondary_llm_flows.query_expansion import semantic_query_rephrase
 from onyx.server.query_and_chat.placement import Placement
 from onyx.server.query_and_chat.streaming_models import Packet
+from onyx.server.query_and_chat.streaming_models import SearchPlannedSource
+from onyx.server.query_and_chat.streaming_models import SearchSourceProgress
 from onyx.server.query_and_chat.streaming_models import SearchToolDocumentsDelta
 from onyx.server.query_and_chat.streaming_models import SearchToolQueriesDelta
+from onyx.server.query_and_chat.streaming_models import SearchToolSourceProgressDelta
 from onyx.server.query_and_chat.streaming_models import SearchToolStart
 from onyx.tools.interface import Tool
 from onyx.tools.models import SearchToolOverrideKwargs
@@ -120,10 +128,53 @@ from onyx.utils.timing import log_function_time
 from shared_configs.configs import DOC_EMBEDDING_CONTEXT_SIZE
 from shared_configs.configs import MODEL_SERVER_HOST
 from shared_configs.configs import MODEL_SERVER_PORT
+from shared_configs.contextvars import get_current_tenant_id
 
 logger = setup_logger()
 
 QUERIES_FIELD = "queries"
+INTERNAL_SOURCE_ID = "internal"
+INTERNAL_SOURCE_NAME = "Internal documents"
+SLACK_SOURCE_ID = "federated-slack"
+SLACK_SOURCE_NAME = "Slack"
+PRELIMINARY_UI_DOCS_LIMIT = 3
+EXACT_IDENTIFIER_RELEVANCE_SCORE_THRESHOLD = 0.45
+
+
+def _source_progress_from_chunks(
+    *,
+    source_id: str,
+    source_name: str,
+    source_kind: Literal["internal", "external", "federated", "web"],
+    chunks: list[InferenceChunk],
+    latency_ms: int,
+) -> SearchSourceProgress:
+    return SearchSourceProgress(
+        source_id=source_id,
+        source_name=source_name,
+        source_kind=source_kind,
+        status="completed" if chunks else "empty",
+        result_count=len(chunks),
+        accepted_count=len(chunks),
+        invalid_count=0,
+        latency_ms=latency_ms,
+    )
+
+
+def _extract_exact_identifier_terms(query: str | None) -> set[str]:
+    if not query:
+        return set()
+
+    # Lenovo option FRUs and similar catalog identifiers are strong lexical
+    # anchors. For these, extra LLM expansion/selection often adds latency
+    # without improving retrieval quality.
+    return {
+        term.upper()
+        for term in re.findall(
+            r"(?<![A-Z0-9])(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{8,}(?![A-Z0-9])",
+            query,
+        )
+    }
 
 
 def deduplicate_queries(
@@ -420,6 +471,75 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
             logger.error("Slack federated search error: %s", e, exc_info=True)
             return []
 
+    def _run_external_retrieval_search(
+        self,
+        query: str,
+        retrieval_info: ExternalRetrievalInfo,
+    ) -> tuple[list[InferenceChunk], SearchSourceProgress]:
+        start = time.monotonic()
+        try:
+            chunks = retrieval_info.retrieval_function(query)
+            latency_ms = int((time.monotonic() - start) * 1000)
+            logger.info(
+                "External retrieval source returned %s chunks: source_id=%s source_name=%s",
+                len(chunks),
+                retrieval_info.source_id,
+                retrieval_info.source_name,
+            )
+            return chunks, _source_progress_from_chunks(
+                source_id=f"external-retrieval-{retrieval_info.source_id}",
+                source_name=retrieval_info.source_name,
+                source_kind="external",
+                chunks=chunks,
+                latency_ms=latency_ms,
+            )
+        except ExternalRetrievalRequestError as e:
+            latency_ms = int((time.monotonic() - start) * 1000)
+            status = "timeout" if e.error_code == "timeout" else "error"
+            logger.warning(
+                "External retrieval search failed open: source_id=%s source_name=%s error_code=%s error=%s",
+                retrieval_info.source_id,
+                retrieval_info.source_name,
+                e.error_code,
+                e,
+                exc_info=True,
+            )
+            return [], SearchSourceProgress(
+                source_id=f"external-retrieval-{retrieval_info.source_id}",
+                source_name=retrieval_info.source_name,
+                source_kind="external",
+                status=status,
+                result_count=0,
+                accepted_count=0,
+                invalid_count=None,
+                latency_ms=latency_ms,
+                warning=(
+                    f"{retrieval_info.source_name} timed out. Continuing with internal documents."
+                    if status == "timeout"
+                    else f"{retrieval_info.source_name} failed. Continuing with internal documents."
+                ),
+            )
+        except Exception as e:
+            latency_ms = int((time.monotonic() - start) * 1000)
+            logger.warning(
+                "External retrieval search failed open: source_id=%s source_name=%s error=%s",
+                retrieval_info.source_id,
+                retrieval_info.source_name,
+                e,
+                exc_info=True,
+            )
+            return [], SearchSourceProgress(
+                source_id=f"external-retrieval-{retrieval_info.source_id}",
+                source_name=retrieval_info.source_name,
+                source_kind="external",
+                status="error",
+                result_count=0,
+                accepted_count=0,
+                invalid_count=None,
+                latency_ms=latency_ms,
+                warning=f"{retrieval_info.source_name} failed. Continuing with internal documents.",
+            )
+
     def _run_search_for_query(
         self,
         query: str,
@@ -480,6 +600,7 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
         """
         from onyx.configs.app_configs import DISABLE_VECTOR_DB
         from onyx.db.connector import check_user_files_exist
+        from onyx.db.external_retrieval import check_external_retrieval_sources_exist
 
         if DISABLE_VECTOR_DB:
             return False
@@ -487,6 +608,7 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
         return (
             check_connectors_exist(db_session)
             or check_federated_connectors_exist(db_session)
+            or check_external_retrieval_sources_exist(db_session)
             or check_user_files_exist(db_session)
         )
 
@@ -536,6 +658,20 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
             )
         )
 
+    def _emit_source_progress(
+        self,
+        placement: Placement,
+        sources: list[SearchSourceProgress],
+    ) -> None:
+        if not sources:
+            return
+        self.emitter.emit(
+            Packet(
+                placement=placement,
+                obj=SearchToolSourceProgressDelta(sources=sources),
+            )
+        )
+
     @log_function_time(print_only=True)
     def run(
         self,
@@ -547,12 +683,15 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
         overall_start_time = time.time()
 
         # Initialize timing variables (in case of early exceptions)
+        db_prefetch_elapsed = 0.0
         query_expansion_elapsed = 0.0
+        search_elapsed = 0.0
         document_selection_elapsed = 0.0
         document_expansion_elapsed = 0.0
 
         # Pre-fetch all DB data in a single short-lived session so that
         # parallel search workers need zero DB connections.
+        db_prefetch_start_time = time.time()
         with get_session_with_current_tenant() as db_session:
             # ACL filters
             acl_filters: list[str] | None = (
@@ -617,6 +756,16 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
                 )
                 or []
             )
+            external_retrieval_infos = (
+                []
+                if self.project_id_filter is not None
+                else get_external_retrieval_functions(
+                    db_session=db_session,
+                    user_id=self.user.id if self.user else None,
+                    document_set_names=self.persona_search_info.document_set_names,
+                    tenant_id=get_current_tenant_id(),
+                )
+            )
 
             # Slack tokens and entity config — only prefetch when Slack
             # search is enabled or we're in a Slack bot context.
@@ -631,6 +780,63 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
                     {},
                 )
         # Session is closed here — all parallel work uses plain Python objects only
+        db_prefetch_elapsed = time.time() - db_prefetch_start_time
+        logger.info(
+            "Search tool - DB prefetch took %s seconds",
+            format(db_prefetch_elapsed, ".3f"),
+        )
+
+        original_query = override_kwargs.original_query
+        exact_identifier_terms = _extract_exact_identifier_terms(original_query)
+        exact_identifier_fast_path = bool(exact_identifier_terms)
+        executable_external_retrieval_infos = (
+            external_retrieval_infos if original_query else []
+        )
+        slack_will_run = bool(slack_access_token and original_query)
+        planned_sources = [
+            SearchPlannedSource(
+                source_id=INTERNAL_SOURCE_ID,
+                source_name=INTERNAL_SOURCE_NAME,
+                source_kind="internal",
+            ),
+            *(
+                [
+                    SearchPlannedSource(
+                        source_id=SLACK_SOURCE_ID,
+                        source_name=SLACK_SOURCE_NAME,
+                        source_kind="federated",
+                    )
+                ]
+                if slack_will_run
+                else []
+            ),
+            *[
+                SearchPlannedSource(
+                    source_id=f"external-retrieval-{info.source_id}",
+                    source_name=info.source_name,
+                    source_kind="external",
+                )
+                for info in executable_external_retrieval_infos
+            ],
+        ]
+        self.emitter.emit(
+            Packet(
+                placement=placement,
+                obj=SearchToolStart(planned_sources=planned_sources),
+            )
+        )
+        self._emit_source_progress(
+            placement=placement,
+            sources=[
+                SearchSourceProgress(
+                    source_id=planned_source.source_id,
+                    source_name=planned_source.source_name,
+                    source_kind=planned_source.source_kind,
+                    status="searching",
+                )
+                for planned_source in planned_sources
+            ],
+        )
 
         if QUERIES_FIELD not in llm_kwargs:
             raise ToolCallException(
@@ -655,9 +861,19 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
         )
         user_info = override_kwargs.user_info
 
-        # Skip query expansion if this is a repeat search call
-        if override_kwargs.skip_query_expansion:
-            logger.debug("Search tool - Skipping query expansion (repeat search call)")
+        # Skip query expansion if this is a repeat search call or the query has a
+        # strong catalog/SKU-like identifier. Exact identifiers are best served by
+        # lexical/hybrid retrieval and avoid two extra LLM calls on the hot path.
+        if override_kwargs.skip_query_expansion or exact_identifier_fast_path:
+            if exact_identifier_fast_path:
+                logger.info(
+                    "Search tool - skipping query expansion for exact identifier query: identifiers=%s",
+                    sorted(exact_identifier_terms),
+                )
+            else:
+                logger.debug(
+                    "Search tool - Skipping query expansion (repeat search call)"
+                )
             semantic_query = None
             keyword_queries: list[str] = []
         else:
@@ -679,7 +895,7 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
 
             # End timing for query expansion/rephrase
             query_expansion_elapsed = time.time() - query_expansion_start_time
-            logger.debug(
+            logger.info(
                 "Search tool - Query expansion/rephrase took %s seconds",
                 format(query_expansion_elapsed, ".3f"),
             )
@@ -710,9 +926,9 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
                 semantic_queries_with_weights.append(
                     (llm_query, LLM_NON_CUSTOM_QUERY_WEIGHT)
                 )
-        if override_kwargs.original_query:
+        if original_query:
             semantic_queries_with_weights.append(
-                (override_kwargs.original_query, ORIGINAL_QUERY_WEIGHT)
+                (original_query, ORIGINAL_QUERY_WEIGHT)
             )
         deduplicated_semantic_queries = deduplicate_queries(
             semantic_queries_with_weights
@@ -790,16 +1006,20 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
             )
             search_weights.append(weight)
 
+        internal_search_count = len(search_functions)
+
         # Add Slack federated search (runs once in parallel with all Vespa queries)
         # This avoids the query multiplication problem where each Vespa query
         # would trigger a separate Slack search.
         # Only run if pre-fetch found a valid Slack access token.
-        if slack_access_token and override_kwargs.original_query:
+        slack_result_index: int | None = None
+        if slack_will_run and original_query:
+            slack_result_index = len(search_functions)
             search_functions.append(
                 (
                     self._run_slack_search,
                     (
-                        override_kwargs.original_query,
+                        original_query,
                         slack_access_token,
                         slack_bot_token,
                         slack_entities,
@@ -810,10 +1030,79 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
             # Use same weight as original query for Slack results
             search_weights.append(ORIGINAL_QUERY_WEIGHT)
 
+        if original_query:
+            for external_retrieval_info in executable_external_retrieval_infos:
+                search_functions.append(
+                    (
+                        self._run_external_retrieval_search,
+                        (
+                            original_query,
+                            external_retrieval_info,
+                        ),
+                    )
+                )
+                search_weights.append(ORIGINAL_QUERY_WEIGHT)
+
         # Run all searches in parallel (Vespa queries + Slack)
+        search_start_time = time.time()
         all_search_results = run_functions_tuples_in_parallel(search_functions)
+        search_elapsed = time.time() - search_start_time
         if not all_search_results:
             all_search_results = []
+
+        external_result_count = len(executable_external_retrieval_infos)
+        external_start_index = (
+            len(all_search_results) - external_result_count
+            if external_result_count
+            else len(all_search_results)
+        )
+        if external_result_count and external_start_index >= 0:
+            external_results = all_search_results[external_start_index:]
+            external_progress: list[SearchSourceProgress] = []
+            for index, external_result in enumerate(external_results):
+                if (
+                    isinstance(external_result, tuple)
+                    and len(external_result) == 2
+                    and isinstance(external_result[1], SearchSourceProgress)
+                ):
+                    chunks, progress = external_result
+                    all_search_results[external_start_index + index] = chunks
+                    external_progress.append(progress)
+            self._emit_source_progress(placement=placement, sources=external_progress)
+
+        if slack_result_index is not None and slack_result_index < len(
+            all_search_results
+        ):
+            slack_result = all_search_results[slack_result_index]
+            if isinstance(slack_result, list):
+                self._emit_source_progress(
+                    placement=placement,
+                    sources=[
+                        _source_progress_from_chunks(
+                            source_id=SLACK_SOURCE_ID,
+                            source_name=SLACK_SOURCE_NAME,
+                            source_kind="federated",
+                            chunks=slack_result,
+                            latency_ms=0,
+                        )
+                    ],
+                )
+
+        internal_result_lists = all_search_results[:internal_search_count]
+        internal_result_count = sum(len(chunks) for chunks in internal_result_lists)
+        self._emit_source_progress(
+            placement=placement,
+            sources=[
+                SearchSourceProgress(
+                    source_id=INTERNAL_SOURCE_ID,
+                    source_name=INTERNAL_SOURCE_NAME,
+                    source_kind="internal",
+                    status="completed" if internal_result_count else "empty",
+                    result_count=internal_result_count,
+                    accepted_count=internal_result_count,
+                )
+            ],
+        )
 
         # Merge results using weighted Reciprocal Rank Fusion
         # This intelligently combines rankings from different queries
@@ -848,49 +1137,78 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
             top_sections, is_internet=False
         )
 
+        preliminary_ui_docs = search_docs[:PRELIMINARY_UI_DOCS_LIMIT]
+        self.emitter.emit(
+            Packet(
+                placement=placement,
+                obj=SearchToolDocumentsDelta(
+                    documents=preliminary_ui_docs,
+                ),
+            )
+        )
+
         secondary_flows_user_query = (
             override_kwargs.original_query
             or semantic_query
             or (llm_queries[0] if llm_queries else "")
         )
 
-        token_counter = get_llm_token_counter(self.llm)
-
-        # Trim sections to fit within token budget before LLM selection
-        # This is to account for very short chunks flooding the search context
-        # Only consider MAX_CHUNKS_FOR_RELEVANCE chunks per section to avoid flooding from
-        # documents with many matching sections
-        max_tokens_for_selection = (
-            override_kwargs.max_llm_chunks or MAX_CHUNKS_FED_TO_CHAT
-        ) * DOC_EMBEDDING_CONTEXT_SIZE
-
-        # This is approximate since it doesn't build the exact string of the call below
-        # Some things are estimated and may be under (like the metadata tokens)
-        sections_for_selection = _trim_sections_by_tokens(
-            sections=top_sections,
-            max_tokens=max_tokens_for_selection,
-            token_counter=token_counter,
-            max_chunks_per_section=MAX_CHUNKS_FOR_RELEVANCE,
+        top_section = top_sections[0]
+        top_section_score = top_section.center_chunk.score or 0.0
+        skip_document_selection = (
+            exact_identifier_fast_path
+            and top_section_score >= EXACT_IDENTIFIER_RELEVANCE_SCORE_THRESHOLD
         )
+        if skip_document_selection:
+            selected_sections = top_sections[:PRELIMINARY_UI_DOCS_LIMIT]
+            best_doc_ids = [
+                section.center_chunk.document_id for section in selected_sections
+            ]
+            logger.info(
+                "Search tool - skipping LLM document selection for exact identifier query: identifiers=%s top_score=%s selected=%s",
+                sorted(exact_identifier_terms),
+                format(top_section_score, ".3f"),
+                len(selected_sections),
+            )
+        else:
+            token_counter = get_llm_token_counter(self.llm)
 
-        # Start timing for LLM document selection
-        document_selection_start_time = time.time()
+            # Trim sections to fit within token budget before LLM selection
+            # This is to account for very short chunks flooding the search context
+            # Only consider MAX_CHUNKS_FOR_RELEVANCE chunks per section to avoid flooding from
+            # documents with many matching sections
+            max_tokens_for_selection = (
+                override_kwargs.max_llm_chunks or MAX_CHUNKS_FED_TO_CHAT
+            ) * DOC_EMBEDDING_CONTEXT_SIZE
 
-        # Use LLM to select the most relevant sections for expansion
-        selected_sections, best_doc_ids = select_sections_for_expansion(
-            sections=sections_for_selection,
-            user_query=secondary_flows_user_query,
-            llm=self.llm,
-            max_chunks_per_section=MAX_CHUNKS_FOR_RELEVANCE,
-        )
+            # This is approximate since it doesn't build the exact string of the call below
+            # Some things are estimated and may be under (like the metadata tokens)
+            sections_for_selection = _trim_sections_by_tokens(
+                sections=top_sections,
+                max_tokens=max_tokens_for_selection,
+                token_counter=token_counter,
+                max_chunks_per_section=MAX_CHUNKS_FOR_RELEVANCE,
+            )
 
-        # End timing for LLM document selection
-        document_selection_elapsed = time.time() - document_selection_start_time
-        logger.debug(
-            "Search tool - LLM picking documents took %s seconds (selected %s sections)",
-            format(document_selection_elapsed, ".3f"),
-            len(selected_sections),
-        )
+            # Start timing for LLM document selection
+            document_selection_start_time = time.time()
+
+            # Use LLM to select the most relevant sections for expansion
+            selected_sections, best_doc_ids = select_sections_for_expansion(
+                sections=sections_for_selection,
+                user_query=secondary_flows_user_query,
+                llm=self.llm,
+                max_chunks_per_section=MAX_CHUNKS_FOR_RELEVANCE,
+            )
+
+            # End timing for LLM document selection
+            document_selection_elapsed = time.time() - document_selection_start_time
+            logger.info(
+                "Search tool - LLM document selection took %s seconds (candidates=%s selected=%s)",
+                format(document_selection_elapsed, ".3f"),
+                len(sections_for_selection),
+                len(selected_sections),
+            )
 
         # Create a set of best document IDs for quick lookup
         best_doc_ids_set = set(best_doc_ids) if best_doc_ids else set()
@@ -954,11 +1272,15 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
         document_expansion_start_time = time.time()
 
         # Run all expansions in parallel
-        expanded_sections = run_functions_tuples_in_parallel(expansion_functions)
+        expanded_sections = (
+            run_functions_tuples_in_parallel(expansion_functions)
+            if expansion_functions
+            else selected_sections
+        )
 
         # End timing for document expansion
         document_expansion_elapsed = time.time() - document_expansion_start_time
-        logger.debug(
+        logger.info(
             "Search tool - Expansion of selected documents took %s seconds (expanded %s sections)",
             format(document_expansion_elapsed, ".3f"),
             len(expanded_sections),
@@ -981,12 +1303,19 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
 
         # End overall timing
         overall_elapsed = time.time() - overall_start_time
-        logger.debug(
-            "Search tool - Total execution time: %s seconds (query expansion: %ss, document selection: %ss, document expansion: %ss)",
+        logger.info(
+            "Search tool - Total execution time: %s seconds (db prefetch: %ss, query expansion: %ss, search: %ss, document selection: %ss, document expansion: %ss, queries: %s, internal results: %s, top sections: %s, selected sections: %s, exact identifier fast path: %s)",
             format(overall_elapsed, ".3f"),
+            format(db_prefetch_elapsed, ".3f"),
             format(query_expansion_elapsed, ".3f"),
+            format(search_elapsed, ".3f"),
             format(document_selection_elapsed, ".3f"),
             format(document_expansion_elapsed, ".3f"),
+            len(all_queries),
+            internal_result_count,
+            len(top_sections),
+            len(selected_sections),
+            exact_identifier_fast_path,
         )
 
         return ToolResponse(

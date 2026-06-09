@@ -61,11 +61,16 @@ export function useTimelineHeader(
       );
       let headerText: string;
       if (searchState.hasResults && !searchState.isInternetSearch) {
-        headerText = "Reading";
+        headerText =
+          searchState.sources.length > 1
+            ? "Reading retrieved evidence"
+            : "Reading";
       } else {
         headerText = searchState.isInternetSearch
           ? "Searching the web"
-          : "Searching internal documents";
+          : searchState.sources.length > 1
+            ? "Searching knowledge sources"
+            : "Searching internal documents";
       }
       return { headerText, hasPackets, userStopped };
     }

@@ -1,4 +1,5 @@
 import { mutate } from "swr";
+import { readBlobAsTextWithFallback } from "@/lib/filePreview";
 import { SWR_KEYS } from "@/lib/swr-keys";
 import {
   ArticleImportResponse,
@@ -214,6 +215,24 @@ export async function deleteImportedArticle(documentId: string): Promise<void> {
     mutate(SWR_KEYS.taxonomyDashboard),
     mutate(SWR_KEYS.taxonomyDocumentTags(documentId)),
   ]);
+}
+
+export function getImportedArticleOriginalUrl(documentId: string): string {
+  return `/api/admin/taxonomy/articles/${encodeURIComponent(documentId)}/original`;
+}
+
+export async function fetchImportedArticleOriginal(
+  documentId: string
+): Promise<string> {
+  const response = await fetch(getImportedArticleOriginalUrl(documentId));
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.detail || payload?.message || response.statusText);
+  }
+  return readBlobAsTextWithFallback(
+    await response.blob(),
+    response.headers.get("Content-Type")
+  );
 }
 
 export async function updateSummary(

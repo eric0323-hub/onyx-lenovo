@@ -14,12 +14,24 @@ import {
   getLanguageByMime,
 } from "@/lib/languages";
 import { fetchChatFile } from "@/lib/chat/svc";
+import {
+  fileNameFromContentDisposition,
+  readBlobAsTextWithFallback,
+} from "@/lib/filePreview";
 import { PreviewContext } from "@/sections/modals/PreviewModal/interfaces";
 import { resolveVariant } from "@/sections/modals/PreviewModal/variants";
 
 interface PreviewModalProps {
   presentingDocument: MinimalOnyxDocument;
   onClose: () => void;
+}
+
+function resolvePreviewFileId(documentId: string): string {
+  if (documentId.startsWith("taxonomy_article__")) {
+    return documentId;
+  }
+
+  return documentId.split("__")[1] || documentId;
 }
 
 export default function PreviewModal({
@@ -67,9 +79,7 @@ export default function PreviewModal({
     setIsLoading(true);
     setLoadError(null);
     setFileContent("");
-    const fileIdLocal =
-      presentingDocument.document_id.split("__")[1] ||
-      presentingDocument.document_id;
+    const fileIdLocal = resolvePreviewFileId(presentingDocument.document_id);
 
     try {
       const response = await fetchChatFile(fileIdLocal);
@@ -82,7 +92,11 @@ export default function PreviewModal({
       });
 
       const originalFileName =
-        presentingDocument.semantic_identifier || "document";
+        fileNameFromContentDisposition(
+          response.headers.get("Content-Disposition")
+        ) ||
+        presentingDocument.semantic_identifier ||
+        "document";
       setFileName(originalFileName);
 
       const rawContentType =
@@ -98,7 +112,7 @@ export default function PreviewModal({
         resolvedMime
       );
       if (resolved.needsTextContent) {
-        setFileContent(await blob.text());
+        setFileContent(await readBlobAsTextWithFallback(blob, rawContentType));
       }
     } catch {
       setLoadError("Failed to load document.");

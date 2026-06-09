@@ -39,6 +39,7 @@ from onyx.llm.interfaces import LLM
 from onyx.taxonomy.constants import TAXONOMY_PROMPT_VERSION
 from onyx.taxonomy.llm_service import generate_document_summary
 from onyx.taxonomy.llm_service import model_info
+from onyx.taxonomy.llm_service import recommend_existing_taxonomy_tags_forced
 from onyx.taxonomy.llm_service import recommend_taxonomy_tags
 from onyx.taxonomy.llm_service import review_taxonomy_candidate_labels
 from onyx.taxonomy.llm_service import TaxonomyCandidateForHealthCheck
@@ -326,6 +327,13 @@ def _append_task_leaf_node(
     return leaf
 
 
+def _added_leaf_change_comment(leaf_names: list[str]) -> str:
+    unique_leaf_names = list(dict.fromkeys(name for name in leaf_names if name))
+    if not unique_leaf_names:
+        return "新增标签"
+    return f"新增标签：{'、'.join(unique_leaf_names)}"
+
+
 def _active_tag_count_for_document(db_session: Session, *, document_id: str) -> int:
     return (
         db_session.scalar(
@@ -396,6 +404,32 @@ def _add_task_generated_tag(
     )
 
 
+def _reuse_existing_leaf_for_candidate(
+    *,
+    db_session: Session,
+    candidate: TaxonomyCandidateLabel,
+    decision: TaxonomyCandidateHealthDecision,
+    leaf_node: TaxonomyNode,
+    task_id: int,
+    document_content_by_id: dict[str, str],
+) -> None:
+    candidate.status = TaxonomyCandidateStatus.REUSED_EXISTING
+    candidate.suggested_reuse_node_id = leaf_node.id
+    _add_task_generated_tag(
+        db_session=db_session,
+        document_id=candidate.document_id,
+        leaf_node=leaf_node,
+        version_id=leaf_node.version_id,
+        task_id=task_id,
+        confidence=candidate.confidence,
+        evidence=candidate.evidence,
+        reason=decision.reason,
+        tagging_source_content=document_content_by_id.get(
+            candidate.document_id, candidate.evidence
+        ),
+    )
+
+
 def _add_tagging_failed_marker(
     *,
     db_session: Session,
@@ -427,6 +461,55 @@ def _add_tagging_failed_marker(
     )
 
 
+def _add_existing_label_fallback_tags(
+    *,
+    db_session: Session,
+    document: Document,
+    content: str,
+    leaf_nodes: list[TaxonomyNode],
+    task: TaxonomyTaggingTask,
+    llm: LLM,
+) -> bool:
+    result = recommend_existing_taxonomy_tags_forced(
+        document_title=document.semantic_id,
+        document_content=content,
+        leaf_nodes=leaf_nodes,
+        llm=llm,
+    )
+    leaf_by_id = {node.id: node for node in leaf_nodes}
+    added_any = False
+    seen_leaf_ids: set[str] = set()
+    for index, recommendation in enumerate(result.tags):
+        if recommendation.leaf_node_id in seen_leaf_ids:
+            continue
+        leaf_node = leaf_by_id.get(recommendation.leaf_node_id)
+        if leaf_node is None:
+            continue
+        seen_leaf_ids.add(recommendation.leaf_node_id)
+        db_session.add(
+            DocumentTaxonomyTag(
+                document_id=document.id,
+                leaf_node_id=leaf_node.id,
+                version_id=leaf_node.version_id,
+                task_id=task.id,
+                full_path_snapshot=leaf_node.full_path,
+                confidence=recommendation.confidence,
+                source=TaxonomyTagSource.AI_RECOMMENDED,
+                is_primary=index == 0,
+                sort_order=index,
+                evidence=recommendation.evidence,
+                unmatched_reason=result.reason or None,
+                tagging_source_content=content,
+                prompt_version=TAXONOMY_PROMPT_VERSION,
+                model_info=model_info(llm),
+                review_status=TaxonomyReviewStatus.UNCONFIRMED,
+                status=TaxonomyAssignmentStatus.ACTIVE,
+            )
+        )
+        added_any = True
+    return added_any
+
+
 def _candidate_health_inputs(
     candidates: list[TaxonomyCandidateLabel],
 ) -> list[TaxonomyCandidateForHealthCheck]:
@@ -441,6 +524,44 @@ def _candidate_health_inputs(
         )
         for candidate in candidates
     ]
+
+
+def _add_low_confidence_leaf_candidate(
+    *,
+    db_session: Session,
+    task_id: int,
+    document_id: str,
+    leaf_node: TaxonomyNode,
+    confidence: float,
+    evidence: str,
+    unmatched_reason: str | None,
+) -> TaxonomyCandidateLabel:
+    path = list(leaf_node.full_path.split(" / "))
+    if len(path) != 3:
+        path = (
+            [*path[:2], leaf_node.name]
+            if len(path) >= 2
+            else ["待分类", "待分类", leaf_node.name]
+        )
+    candidate = TaxonomyCandidateLabel(
+        task_id=task_id,
+        document_id=document_id,
+        candidate_path=path,
+        definition=(
+            f"基于低置信已有标签“{leaf_node.full_path}”提出的更贴切三级标签候选。"
+            f"原标签置信度为 {confidence:.2f}，低于自动生效阈值 "
+            f"{TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD:.2f}。"
+        ),
+        evidence=evidence
+        or unmatched_reason
+        or f"已有标签“{leaf_node.full_path}”置信度低于阈值，需要健康自检判断是否新增或复用。",
+        confidence=max(confidence, TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD),
+        status=TaxonomyCandidateStatus.PENDING_REVIEW,
+        redundancy_result="pending_health_check",
+        suggested_reuse_node_id=None,
+    )
+    db_session.add(candidate)
+    return candidate
 
 
 def _active_leaf_nodes_by_code(
@@ -551,6 +672,7 @@ def _process_candidate_labels_after_batch(
         added_codes_by_candidate_id: dict[int, str] = {}
         code_by_add_key: dict[tuple[str, str], str] = {}
         seen_add_keys: dict[tuple[str, str], str] = {}
+        added_leaf_names_by_code: dict[str, str] = {}
         for decision in add_decisions:
             parent_node = node_by_old_id.get(decision.parent_l2_node_id or "")
             if parent_node is None:
@@ -573,11 +695,20 @@ def _process_candidate_labels_after_batch(
             )
             if leaf.code is None:
                 continue
+            added_leaf_names_by_code[leaf.code] = decision.leaf_name or leaf.name
             seen_add_keys[add_key] = leaf.code
             code_by_add_key[add_key] = leaf.code
             added_codes_by_candidate_id[decision.candidate_id] = leaf.code
 
         if added_codes_by_candidate_id:
+            added_code_values = set(added_codes_by_candidate_id.values())
+            added_leaf_comment = _added_leaf_change_comment(
+                [
+                    added_leaf_names_by_code[code]
+                    for code in added_leaf_names_by_code
+                    if code in added_code_values
+                ]
+            )
             new_version = create_taxonomy_version_from_tree(
                 db_session,
                 nodes=tree,
@@ -585,11 +716,8 @@ def _process_candidate_labels_after_batch(
                 industry_context=None,
                 company_description=None,
                 source=TaxonomyVersionSource.TAGGING_OPTIMIZATION,
-                change_summary=(
-                    f"Added {len(set(added_codes_by_candidate_id.values()))} "
-                    f"task-generated taxonomy leaf labels"
-                ),
-                change_reason=f"Taxonomy tagging task {task.id} optimization",
+                change_summary=added_leaf_comment,
+                change_reason=added_leaf_comment,
                 created_by_user_id=created_by_user_id,
                 activate=True,
             )
@@ -654,27 +782,23 @@ def _process_candidate_labels_after_batch(
             continue
 
         candidate.redundancy_result = decision.action
-        if decision.action == "reuse_existing" and decision.suggested_reuse_node_id:
+        if (
+            decision.action in {"reuse_existing", "reject"}
+            and decision.suggested_reuse_node_id
+        ):
             leaf_node = reusable_leaf_by_id.get(decision.suggested_reuse_node_id)
             if leaf_node is None:
                 candidate.status = TaxonomyCandidateStatus.NEEDS_HANDLING
                 continue
             if new_version is not None:
                 leaf_node = base_leaf_to_new_leaf.get(leaf_node.id, leaf_node)
-            candidate.status = TaxonomyCandidateStatus.REUSED_EXISTING
-            candidate.suggested_reuse_node_id = leaf_node.id
-            _add_task_generated_tag(
+            _reuse_existing_leaf_for_candidate(
                 db_session=db_session,
-                document_id=candidate.document_id,
+                candidate=candidate,
+                decision=decision,
                 leaf_node=leaf_node,
-                version_id=leaf_node.version_id,
                 task_id=task.id,
-                confidence=candidate.confidence,
-                evidence=candidate.evidence,
-                reason=decision.reason,
-                tagging_source_content=document_content_by_id.get(
-                    candidate.document_id, candidate.evidence
-                ),
+                document_content_by_id=document_content_by_id,
             )
         elif decision.action == "add_leaf":
             leaf_node = new_leaf_by_candidate_id.get(candidate.id)
@@ -734,6 +858,7 @@ def run_tagging_task(
     llm: LLM = get_default_llm(temperature=0)
     leaf_nodes = _active_leaf_nodes(db_session, version.id)
     leaf_by_id = {node.id: node for node in leaf_nodes}
+    document_by_id = {document.id: document for document in documents}
     candidate_labels: list[TaxonomyCandidateLabel] = []
     document_content_by_id: dict[str, str] = {}
     failed_document_ids: set[str] = set()
@@ -751,6 +876,7 @@ def run_tagging_task(
                 document_content=content,
                 leaf_nodes=leaf_nodes,
                 enable_optimization=request.enable_optimization,
+                active_confidence_threshold=TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD,
                 llm=llm,
             )
             invalidate_active_document_taxonomy_tags(
@@ -761,6 +887,23 @@ def run_tagging_task(
             for index, recommendation in enumerate(result.tags):
                 leaf_node = leaf_by_id.get(recommendation.leaf_node_id)
                 if leaf_node is None:
+                    continue
+                if (
+                    request.enable_optimization
+                    and recommendation.confidence
+                    < TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD
+                ):
+                    candidate_labels.append(
+                        _add_low_confidence_leaf_candidate(
+                            db_session=db_session,
+                            task_id=task.id,
+                            document_id=document.id,
+                            leaf_node=leaf_node,
+                            confidence=recommendation.confidence,
+                            evidence=recommendation.evidence,
+                            unmatched_reason=result.unmatched_reason,
+                        )
+                    )
                     continue
                 db_session.add(
                     DocumentTaxonomyTag(
@@ -779,14 +922,7 @@ def run_tagging_task(
                         prompt_version=TAXONOMY_PROMPT_VERSION,
                         model_info=model_info(llm),
                         review_status=TaxonomyReviewStatus.UNCONFIRMED,
-                        status=(
-                            TaxonomyAssignmentStatus.ACTIVE
-                            if (
-                                recommendation.confidence
-                                >= TAXONOMY_TAG_CONFIDENCE_ACTIVE_THRESHOLD
-                            )
-                            else TaxonomyAssignmentStatus.NEEDS_REVIEW
-                        ),
+                        status=TaxonomyAssignmentStatus.ACTIVE,
                     )
                 )
 
@@ -831,6 +967,8 @@ def run_tagging_task(
             llm=llm,
         )
         db_session.flush()
+        fallback_version = get_active_taxonomy_version(db_session) or version
+        fallback_leaf_nodes = _active_leaf_nodes(db_session, fallback_version.id)
         for document_id, content in document_content_by_id.items():
             if document_id in failed_document_ids:
                 continue
@@ -840,6 +978,24 @@ def run_tagging_task(
                 task_id=task.id,
             ):
                 continue
+            document = document_by_id.get(document_id)
+            if document is not None:
+                try:
+                    if _add_existing_label_fallback_tags(
+                        db_session=db_session,
+                        document=document,
+                        content=content,
+                        leaf_nodes=fallback_leaf_nodes,
+                        task=task,
+                        llm=llm,
+                    ):
+                        continue
+                except Exception as e:
+                    logger.exception(
+                        "Failed fallback taxonomy-tagging for document %s",
+                        document_id,
+                    )
+                    task.error_message = str(e)
             failed_document_ids.add(document_id)
             task.failed_docs += 1
             reason = "未匹配到可用标签，需要人工处理"

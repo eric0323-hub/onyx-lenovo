@@ -59,7 +59,8 @@ node_modules
 
 # plans
 plans/
-
+test_outputs/
+demo-data/
 # Added context for LLMs
 .claude/CLAUDE.md
 .claude/settings.local.json

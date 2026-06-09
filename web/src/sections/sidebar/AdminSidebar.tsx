@@ -75,6 +75,10 @@ function buildItems(
     add(SECTIONS.DOCUMENTS_AND_KNOWLEDGE, ADMIN_ROUTES.ADD_CONNECTOR);
     add(SECTIONS.DOCUMENTS_AND_KNOWLEDGE, ADMIN_ROUTES.DOCUMENT_SETS);
     if (!isCurator) {
+      add(
+        SECTIONS.DOCUMENTS_AND_KNOWLEDGE,
+        ADMIN_ROUTES.EXTERNAL_RETRIEVAL_SOURCES
+      );
       if (isAdminRouteVisible(ADMIN_ROUTES.INDEX_SETTINGS)) {
         items.push({
           ...sidebarItem(ADMIN_ROUTES.INDEX_SETTINGS),

@@ -23,6 +23,7 @@ class StreamingType(Enum):
     MESSAGE_DELTA = "message_delta"
     SEARCH_TOOL_START = "search_tool_start"
     SEARCH_TOOL_QUERIES_DELTA = "search_tool_queries_delta"
+    SEARCH_TOOL_SOURCE_PROGRESS_DELTA = "search_tool_source_progress_delta"
     SEARCH_TOOL_DOCUMENTS_DELTA = "search_tool_documents_delta"
     OPEN_URL_START = "open_url_start"
     OPEN_URL_URLS = "open_url_urls"
@@ -160,6 +161,42 @@ class SearchToolStart(BaseObj):
     type: Literal["search_tool_start"] = StreamingType.SEARCH_TOOL_START.value
 
     is_internet_search: bool = False
+    planned_sources: list["SearchPlannedSource"] = Field(default_factory=list)
+
+
+class SearchPlannedSource(BaseModel):
+    source_id: str
+    source_name: str
+    source_kind: Literal["internal", "external", "federated", "web"]
+
+
+class SearchSourceProgress(BaseModel):
+    source_id: str
+    source_name: str
+    source_kind: Literal["internal", "external", "federated", "web"]
+    status: Literal[
+        "pending",
+        "searching",
+        "normalizing",
+        "completed",
+        "empty",
+        "skipped",
+        "timeout",
+        "error",
+    ]
+    result_count: int | None = None
+    accepted_count: int | None = None
+    invalid_count: int | None = None
+    latency_ms: int | None = None
+    warning: str | None = None
+
+
+class SearchToolSourceProgressDelta(BaseObj):
+    type: Literal["search_tool_source_progress_delta"] = (
+        StreamingType.SEARCH_TOOL_SOURCE_PROGRESS_DELTA.value
+    )
+
+    sources: list[SearchSourceProgress]
 
 
 # Queries coming through as the LLM determines what to search
@@ -427,6 +464,7 @@ PacketObj = Union[
     # Tool Packets
     SearchToolStart,
     SearchToolQueriesDelta,
+    SearchToolSourceProgressDelta,
     SearchToolDocumentsDelta,
     ImageGenerationToolStart,
     ImageGenerationToolHeartbeat,

@@ -268,6 +268,7 @@ class DocumentSource(str, Enum):
     # Raw files for Craft sandbox access (xlsx, pptx, docx, etc.)
     # Uses RAW_BINARY processing mode - no text extraction
     CRAFT_FILE = "craft_file"
+    EXTERNAL_RETRIEVAL = "external_retrieval"
 
 
 class FederatedConnectorSource(str, Enum):
@@ -737,4 +738,5 @@ DocumentSourceDescription: dict[DocumentSource, str] = {
     DocumentSource.DRUPAL_WIKI: "Knowledge base pages and content",
     DocumentSource.IMAP: "Email messages and threads",
     DocumentSource.TESTRAIL: "Test cases and QA management",
+    DocumentSource.EXTERNAL_RETRIEVAL: "External retrieval sources",
 }

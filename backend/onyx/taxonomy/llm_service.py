@@ -33,10 +33,19 @@ from onyx.utils.logger import setup_logger
 logger = setup_logger()
 
 JSON_OBJECT_RESPONSE_FORMAT: dict[str, str] = {"type": "json_object"}
-JSON_OBJECT_RESPONSE_FORMAT_PROVIDERS = {
-    LlmProviderNames.OPENAI,
-    LlmProviderNames.AZURE,
+JSON_OBJECT_RESPONSE_FORMAT_PROVIDERS: set[str] = {
+    LlmProviderNames.OPENAI.value,
+    LlmProviderNames.AZURE.value,
+    "volcengine",
+    "deepseek",
 }
+JSON_OBJECT_RESPONSE_FORMAT_DEEPSEEK_PROXY_PROVIDERS: set[str] = {
+    LlmProviderNames.OPENROUTER.value,
+    LlmProviderNames.OPENAI_COMPATIBLE.value,
+    LlmProviderNames.LITELLM_PROXY.value,
+}
+DEEPSEEK_TAXONOMY_MIN_OUTPUT_TOKENS = 8000
+DISABLE_THINKING_EXTRA_BODY: dict[str, bool] = {"enable_thinking": False}
 
 
 @dataclass(frozen=True)
@@ -62,6 +71,12 @@ class TaxonomyTaggingResult:
     tags: list[TaxonomyTagRecommendation]
     unmatched_reason: str | None
     candidates: list[TaxonomyCandidateRecommendation]
+
+
+@dataclass(frozen=True)
+class TaxonomyExistingLabelFallbackResult:
+    tags: list[TaxonomyTagRecommendation]
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -117,7 +132,25 @@ SYSTEM_TAXONOMY_QUALITY_CRITERIA = """
 def _json_response_format_for_llm(llm: LLM) -> dict[str, str] | None:
     if llm.config.model_provider in JSON_OBJECT_RESPONSE_FORMAT_PROVIDERS:
         return JSON_OBJECT_RESPONSE_FORMAT
+    if (
+        llm.config.model_provider in JSON_OBJECT_RESPONSE_FORMAT_DEEPSEEK_PROXY_PROVIDERS
+        and "deepseek" in llm.config.model_name.lower()
+    ):
+        return JSON_OBJECT_RESPONSE_FORMAT
     return None
+
+
+def _is_deepseek_llm(llm: LLM) -> bool:
+    return llm.config.model_provider == "deepseek" or (
+        llm.config.model_provider in JSON_OBJECT_RESPONSE_FORMAT_DEEPSEEK_PROXY_PROVIDERS
+        and "deepseek" in llm.config.model_name.lower()
+    )
+
+
+def _taxonomy_json_max_tokens_for_llm(*, llm: LLM, max_tokens: int) -> int:
+    if _is_deepseek_llm(llm):
+        return max(max_tokens, DEEPSEEK_TAXONOMY_MIN_OUTPUT_TOKENS)
+    return max_tokens
 
 
 def _strip_json_markdown(raw: str) -> str:
@@ -180,6 +213,7 @@ def _repair_json_with_llm(*, raw: str, llm: LLM) -> dict[str, Any]:
             structured_response_format=_json_response_format_for_llm(llm),
             max_tokens=max(1200, len(json_text) // 2),
             reasoning_effort=ReasoningEffort.OFF,
+            extra_body=DISABLE_THINKING_EXTRA_BODY,
         )
         record_llm_response(span_generation, response)
     return _extract_json(llm_response_to_string(response))
@@ -201,8 +235,12 @@ def _invoke_json(
         response = llm.invoke(
             prompt_msg,
             structured_response_format=_json_response_format_for_llm(llm),
-            max_tokens=max_tokens,
+            max_tokens=_taxonomy_json_max_tokens_for_llm(
+                llm=llm,
+                max_tokens=max_tokens,
+            ),
             reasoning_effort=ReasoningEffort.OFF,
+            extra_body=DISABLE_THINKING_EXTRA_BODY,
         )
         record_llm_response(span_generation, response)
     raw = llm_response_to_string(response)
@@ -804,6 +842,7 @@ def recommend_taxonomy_tags(
     document_content: str,
     leaf_nodes: list[TaxonomyNode],
     enable_optimization: bool,
+    active_confidence_threshold: float,
     llm: LLM | None = None,
 ) -> TaxonomyTaggingResult:
     if not leaf_nodes:
@@ -825,6 +864,9 @@ def recommend_taxonomy_tags(
 - 只能从候选 leaf id 中选择标签。
 - 可多标签，但通常选择 1-3 个最相关 leaf。
 - confidence 为 0 到 1。
+- active_confidence_threshold={active_confidence_threshold}。
+- tags 只能输出 confidence >= active_confidence_threshold 的已有 leaf。
+- 如果最接近的已有 leaf 置信度低于 active_confidence_threshold，不要把它输出到 tags；当 enable_optimization=true 时，改在 candidates 中提出一个更贴切的三级 leaf 候选，交给后续健康自检判断是否新增或复用已有 leaf。
 - 若无法覆盖，写 unmatched_reason。
 - enable_optimization={str(enable_optimization).lower()}。只有为 true 时，才允许输出 candidates。
 - candidates 必须是完整三级路径，字段 path 为长度 3 的数组。
@@ -912,6 +954,79 @@ def recommend_taxonomy_tags(
     )
 
 
+def recommend_existing_taxonomy_tags_forced(
+    *,
+    document_title: str,
+    document_content: str,
+    leaf_nodes: list[TaxonomyNode],
+    llm: LLM | None = None,
+) -> TaxonomyExistingLabelFallbackResult:
+    if not leaf_nodes:
+        raise ValueError("Cannot fallback-tag documents without active leaf nodes")
+
+    llm = llm or get_default_llm(temperature=0)
+    leaf_cards = "\n".join(
+        f"- id: {node.id}\n  path: {node.full_path}\n  definition: {node.definition}\n"
+        f"  keywords: {', '.join(node.keywords or [])}\n"
+        f"  synonyms: {', '.join(node.synonyms or [])}\n"
+        f"  positive: {', '.join(node.positive_examples or [])}\n"
+        f"  negative: {', '.join(node.negative_examples or [])}"
+        for node in leaf_nodes
+    )
+    prompt = f"""
+你是企业知识库兜底打标 Agent。前序打标没有产生可用标签，但当前文档必须绑定已有三级 leaf。
+
+必须遵守：
+- 只输出 JSON 对象。
+- 只能从候选 leaf id 中选择标签，不允许输出新增标签或候选标签。
+- 必须至少选择 1 个最合适的已有 leaf，最多 3 个。
+- 如果没有完美匹配，也要选择语义最接近、最能承载该文档主要内容的已有 leaf。
+- confidence 为 0 到 1；不确定时可以降低 confidence，但不要空返回。
+
+输出 JSON 结构：
+{{
+  "tags": [{{"leaf_node_id": "...", "confidence": 0.74, "evidence": "..."}}],
+  "reason": "说明为什么这些已有 leaf 是当前最适合复用的标签"
+}}
+
+候选 leaf：
+{leaf_cards}
+
+文档标题：
+{document_title}
+
+打标输入：
+{document_content[:12000]}
+"""
+    parsed = _invoke_json(
+        llm=llm,
+        prompt=prompt,
+        flow=LLMFlow.TAXONOMY_EXISTING_LABEL_FALLBACK,
+        max_tokens=1800,
+    )
+    valid_leaf_ids = {node.id for node in leaf_nodes}
+    tags: list[TaxonomyTagRecommendation] = []
+    for raw_tag in parsed.get("tags", []):
+        if not isinstance(raw_tag, dict):
+            continue
+        leaf_id = raw_tag.get("leaf_node_id")
+        if not isinstance(leaf_id, str) or leaf_id not in valid_leaf_ids:
+            continue
+        tags.append(
+            TaxonomyTagRecommendation(
+                leaf_node_id=leaf_id,
+                confidence=_coerce_confidence(raw_tag.get("confidence")),
+                evidence=str(raw_tag.get("evidence") or ""),
+            )
+        )
+
+    reason = parsed.get("reason")
+    return TaxonomyExistingLabelFallbackResult(
+        tags=tags,
+        reason=reason if isinstance(reason, str) else "",
+    )
+
+
 def _coerce_str_list(raw: Any) -> list[str]:
     if not isinstance(raw, list):
         return []
@@ -983,11 +1098,12 @@ def review_taxonomy_candidate_labels(
 - decisions 必须覆盖每个 candidate_id，且每个 candidate_id 只能出现一次。
 - action 只能是 reuse_existing、add_leaf、reject、needs_handling。
 - reuse_existing 必须给出已有 leaf 的 suggested_reuse_node_id。
+- reject 只表示“拒绝新增该候选 leaf，因为它与已有 leaf 冗余”；必须给出已有 leaf 的 suggested_reuse_node_id，后续文档会绑定该已有 leaf。
 - add_leaf 必须给出已有二级节点 parent_l2_node_id，不允许新增一级或二级节点。
 - add_leaf 的 leaf 需要包含 name、definition、applicability、keywords、synonyms、positive_examples、negative_examples。
 - 如果候选需要新增一级或二级主干，输出 needs_handling，不要 add_leaf。
 - 如果候选只是同义词、命名变体、细粒度重复或可被已有 leaf 覆盖，输出 reuse_existing。
-- 如果候选语义不清、证据不足、路径不符合三级结构，输出 reject 或 needs_handling。
+- 如果候选语义不清、证据不足、路径不符合三级结构，且无法匹配到已有 leaf，输出 needs_handling，不要输出 reject。
 - 批量内候选之间也要去重；语义相同的多个候选应复用同一个 add_leaf 决策或复用已有 leaf。
 - optimization_strength={optimization_strength or ""}
 
@@ -1055,7 +1171,10 @@ def review_taxonomy_candidate_labels(
         if parent_l2_node_id is not None:
             parent_l2_node_id = str(parent_l2_node_id).strip() or None
 
-        if action == "reuse_existing" and suggested_reuse_node_id not in valid_leaf_ids:
+        if (
+            action in {"reuse_existing", "reject"}
+            and suggested_reuse_node_id not in valid_leaf_ids
+        ):
             action = "needs_handling"
             suggested_reuse_node_id = None
         if action == "add_leaf" and parent_l2_node_id not in valid_l2_ids:

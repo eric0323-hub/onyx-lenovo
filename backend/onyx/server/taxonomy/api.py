@@ -1,10 +1,13 @@
 import json
 from collections.abc import Iterator
+from urllib.parse import quote
 
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import File
+from fastapi import Request
 from fastapi import UploadFile
+from fastapi.responses import Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -32,6 +35,8 @@ from onyx.db.taxonomy import document_taxonomy_tag_snapshot
 from onyx.db.taxonomy import get_active_taxonomy
 from onyx.db.taxonomy import get_document_summaries
 from onyx.db.taxonomy import get_imported_taxonomy_article
+from onyx.db.taxonomy import get_imported_taxonomy_article_file_id
+from onyx.db.taxonomy import get_imported_taxonomy_article_file_name
 from onyx.db.taxonomy import get_taxonomy_coverage
 from onyx.db.taxonomy import taxonomy_snapshot
 from onyx.db.taxonomy import taxonomy_version_snapshot
@@ -69,12 +74,28 @@ from onyx.taxonomy.service import update_manual_summary
 from shared_configs.contextvars import get_current_tenant_id
 
 router = APIRouter(prefix="/admin/taxonomy")
+TAXONOMY_DASHBOARD_SUMMARY_LIMIT = 500
 
 
 def _imported_article_error_code(error: ValueError) -> OnyxErrorCode:
     if str(error) == "文章不存在":
         return OnyxErrorCode.NOT_FOUND
     return OnyxErrorCode.INVALID_INPUT
+
+
+def _taxonomy_article_media_type(file_name: str | None, stored_type: str | None) -> str:
+    lower_name = (file_name or "").lower()
+    if lower_name.endswith(".pdf"):
+        return "application/pdf"
+    if lower_name.endswith(".md") or lower_name.endswith(".markdown"):
+        return "text/markdown; charset=utf-8"
+    return stored_type or "application/octet-stream"
+
+
+def _inline_content_disposition(file_name: str) -> str:
+    escaped_file_name = file_name.replace("\\", "\\\\").replace('"', '\\"')
+    encoded_file_name = quote(file_name)
+    return f'inline; filename="{escaped_file_name}"; filename*=UTF-8\'\'{encoded_file_name}'
 
 
 def _runtime_generation_config_from_template_config(
@@ -111,7 +132,10 @@ def get_taxonomy_dashboard(
     return TaxonomyDashboardResponse(
         taxonomy=taxonomy_snapshot(taxonomy),
         coverage=get_taxonomy_coverage(db_session),
-        summaries=get_document_summaries(db_session, limit=20),
+        summaries=get_document_summaries(
+            db_session,
+            limit=TAXONOMY_DASHBOARD_SUMMARY_LIMIT,
+        ),
         recent_tasks=[
             TaxonomyTaggingTaskSnapshot(
                 id=task.id,
@@ -373,6 +397,48 @@ def import_articles(
             ) from e
 
     return ArticleImportResponse(imported=queued, failed=failed)
+
+
+@router.get("/articles/{document_id}/original")
+def get_imported_article_original(
+    document_id: str,
+    request: Request,
+    _: object = Depends(require_permission(Permission.FULL_ADMIN_PANEL_ACCESS)),
+    db_session: Session = Depends(get_session),
+) -> Response:
+    try:
+        document = get_imported_taxonomy_article(db_session, document_id=document_id)
+    except ValueError as e:
+        raise OnyxError(_imported_article_error_code(e), str(e)) from e
+
+    file_id = get_imported_taxonomy_article_file_id(document)
+    if file_id is None:
+        raise OnyxError(OnyxErrorCode.NOT_FOUND, "原文文件不存在")
+
+    file_store = get_default_file_store()
+    try:
+        file_record = file_store.read_file_record(file_id)
+    except Exception as e:
+        raise OnyxError(OnyxErrorCode.NOT_FOUND, "原文文件不存在") from e
+
+    file_name = (
+        get_imported_taxonomy_article_file_name(document)
+        or file_record.display_name
+        or "article"
+    )
+    media_type = _taxonomy_article_media_type(file_name, file_record.file_type)
+    etag = f'"taxonomy-article-original-{file_id}"'
+    headers = {
+        "Cache-Control": "private, max-age=31536000, immutable",
+        "Content-Disposition": _inline_content_disposition(file_name),
+        "ETag": etag,
+        "Vary": "Cookie",
+    }
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+
+    file_io = file_store.read_file(file_id, mode="b")
+    return StreamingResponse(file_io, media_type=media_type, headers=headers)
 
 
 @router.put("/summaries/{document_id}")

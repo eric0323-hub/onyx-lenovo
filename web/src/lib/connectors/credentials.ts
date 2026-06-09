@@ -463,6 +463,7 @@ export const credentialTemplates: Record<ValidSources, any> = {
   wikipedia: null,
   mediawiki: null,
   web: null,
+  external_retrieval: null,
   not_applicable: null,
   ingestion_api: null,
   federated_slack: null,

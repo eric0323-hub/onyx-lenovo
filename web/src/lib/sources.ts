@@ -401,6 +401,12 @@ export const SOURCE_METADATA_MAP: SourceMap = {
     docs: `${DOCS_ADMINS_PATH}/connectors/official/web`,
     isPopular: true,
   },
+  external_retrieval: {
+    icon: SvgGlobe,
+    displayName: "External Retrieval",
+    category: SourceCategory.Other,
+    isPopular: false,
+  },
   file: {
     icon: SvgFileText,
     displayName: "File",
@@ -482,6 +488,7 @@ export function listSourceMetadata(): SourceMetadata[] {
         source !== "mock_connector" &&
         // use the "regular" slack connector when listing
         source !== "federated_slack" &&
+        source !== "external_retrieval" &&
         // user_file is for internal use (projects), not the Add Connector page
         source !== "user_file"
     )

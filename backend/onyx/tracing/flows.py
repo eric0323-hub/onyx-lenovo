@@ -47,6 +47,7 @@ class LLMFlow(StrEnum):
     TAXONOMY_JSON_REPAIR = "taxonomy_json_repair"
     TAXONOMY_TAGGING = "taxonomy_tagging"
     TAXONOMY_HEALTH_CHECK = "taxonomy_health_check"
+    TAXONOMY_EXISTING_LABEL_FALLBACK = "taxonomy_existing_label_fallback"
 
     # Knowledge graph
     KG_DOCUMENT_CLASSIFICATION = "kg_document_classification"

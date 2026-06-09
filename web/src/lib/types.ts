@@ -594,6 +594,7 @@ export enum ValidSources {
   Imap = "imap",
   Bitbucket = "bitbucket",
   TestRail = "testrail",
+  ExternalRetrieval = "external_retrieval",
 
   // Craft-specific sources
   CraftFile = "craft_file",
@@ -631,6 +632,7 @@ export type ConfigurableSources = Exclude<
   | ValidSources.NotApplicable
   | ValidSources.IngestionApi
   | ValidSources.FederatedSlack // is part of ValiedSources.Slack
+  | ValidSources.ExternalRetrieval
   | ValidSources.UserFile
   | ValidSources.CraftFile // User Library - managed through dedicated UI
 >;

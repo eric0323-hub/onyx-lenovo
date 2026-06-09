@@ -1,5 +1,9 @@
 const CHAT_FILE_PREFIX = "/api/chat/file";
 
+export function getChatFileUrl(fileId: string): string {
+  return `${CHAT_FILE_PREFIX}/${encodeURIComponent(fileId)}`;
+}
+
 /**
  * Fetch a chat file by its ID, returning the raw Response.
  *
@@ -7,13 +11,10 @@ const CHAT_FILE_PREFIX = "/api/chat/file";
  * `.text()`) since different consumers need different formats.
  */
 export async function fetchChatFile(fileId: string): Promise<Response> {
-  const response = await fetch(
-    `${CHAT_FILE_PREFIX}/${encodeURIComponent(fileId)}`,
-    {
-      method: "GET",
-      cache: "force-cache",
-    }
-  );
+  const response = await fetch(getChatFileUrl(fileId), {
+    method: "GET",
+    cache: "force-cache",
+  });
 
   if (!response.ok) {
     throw new Error("Failed to load document.");

@@ -285,14 +285,18 @@ export default function useChatController({
       const response = await nameChatSession(chatSessionId);
 
       if (!response.ok) {
-        console.error("Failed to name chat session, status:", response.status);
+        const responseText = await response.text();
+        console.warn("Chat session auto-naming failed", {
+          status: response.status,
+          detail: responseText.slice(0, 500),
+        });
         // Still refresh to show the unnamed chat in sidebar
         refreshChatSessions();
         fetchProjects();
         return;
       }
     } catch (error) {
-      console.error("Failed to name chat session:", error);
+      console.warn("Chat session auto-naming failed", error);
     } finally {
       // Refresh sidebar to show new name
       await refreshChatSessions();

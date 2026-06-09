@@ -1298,6 +1298,55 @@ def test_multithreaded_invoke_without_custom_config_skips_env_lock() -> None:
     mock_env_lock.assert_not_called()
 
 
+def test_invoke_merges_per_call_extra_body_without_mutating_defaults() -> None:
+    model_provider = LlmProviderNames.OPENAI_COMPATIBLE
+    model_name = "qwen3.5-plus"
+    default_extra_body = {"existing": True}
+    llm = LitellmLLM(
+        api_key="key",
+        timeout=30,
+        model_provider=model_provider,
+        model_name=model_name,
+        max_input_tokens=get_max_input_tokens(
+            model_provider=model_provider,
+            model_name=model_name,
+        ),
+        api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model_kwargs={"extra_body": default_extra_body},
+    )
+
+    mock_stream_chunks = [
+        litellm.ModelResponse(
+            id="chatcmpl-123",
+            choices=[
+                litellm.Choices(
+                    delta=_create_delta(role="assistant", content="Hi"),
+                    finish_reason="stop",
+                    index=0,
+                )
+            ],
+            model=model_name,
+        ),
+    ]
+    observed_kwargs: dict[str, Any] = {}
+
+    def fake_completion(**kwargs: Any) -> list[litellm.ModelResponse]:
+        observed_kwargs.update(kwargs)
+        return mock_stream_chunks
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        llm.invoke(
+            [UserMessage(content="Hi")],
+            extra_body={"enable_thinking": False},
+        )
+
+    assert observed_kwargs["extra_body"] == {
+        "existing": True,
+        "enable_thinking": False,
+    }
+    assert default_extra_body == {"existing": True}
+
+
 # ---- Tests for Bedrock tool content stripping ----
 
 
